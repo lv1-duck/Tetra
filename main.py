@@ -190,7 +190,7 @@ class MainScreen(Screen):
             radius=Sizes.RADIUS_MEDIUM
         )
         header.add_widget(Label(
-            text="Tetra PDF Utility Tool",
+            text="PDF Utility Tool",
             color=Theme.TEXT_PRIMARY,
             font_size=dp(24),
             bold=True
@@ -388,7 +388,7 @@ class MainScreen(Screen):
 
 class PDFApp(App):
     def build(self):
-        self.title = "Tetra PDF Manager"
+        self.title = "PDF Utility Tool"
         sm = ScreenManager()
         sm.add_widget(MainScreen(name='main'))
         return sm

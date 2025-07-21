@@ -4,6 +4,7 @@ Handles file selection, validation, and PDF operations
 """
 
 import os
+from plyer import filechooser # mobile file picking
 from typing import List, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -198,7 +199,6 @@ class PDFFileManager:
             )
     
     def _is_valid_pdf(self, file_path: str) -> bool:
-        """Check if file is a valid PDF"""
         if not PDF_LIBRARY_AVAILABLE:
             # Basic check without library
             try:
@@ -218,7 +218,6 @@ class PDFFileManager:
 
 # Platform-specific file picking functions
 def pick_files_desktop(callback: Callable[[List[str]], None]):
-    """Desktop file picker using tkinter"""
     try:
         from tkinter import filedialog
         import tkinter as tk
@@ -252,16 +251,27 @@ def request_storage_permissions(platform: str):
 
 
 def pick_files_mobile(callback: Callable[[List[str]], None], platform: str):
-    """Mobile file picker - placeholder implementation"""
     # This would need platform-specific implementation
-    # For now, just a placeholder
-    print(f"Mobile file picker not implemented for {platform}")
-    callback([])
+    
+    if platform == 'android' or platform == 'ios':
+        # Use plyer for Android file picking
+        try:
+            files = filechooser.open_file(
+                title="Select PDF Files",
+                filters=[('PDF files', '*.pdf')]
+            )
+            callback(files if files else [])
+        except Exception as e:
+            callback([])
+            
+    else:
+        print("Unsupported platform for mobile file picker")
+        callback([])
+        return
 
 
 # Utility functions
 def get_default_output_path() -> str:
-    """Get default output path for merged PDF"""
     desktop = os.path.join(os.path.expanduser("~"), "Desktop")
     if os.path.exists(desktop):
         return os.path.join(desktop, "merged_document.pdf")
@@ -270,13 +280,12 @@ def get_default_output_path() -> str:
 
 
 def format_file_size(file_path: str) -> str:
-    """Get human-readable file size"""
     try:
         size = os.path.getsize(file_path)
         for unit in ['B', 'KB', 'MB', 'GB']:
             if size < 1024:
                 return f"{size:.1f} {unit}"
             size /= 1024
-        return f"{size:.1f} TB"
+        return "Massive file size"
     except:
         return "Unknown size"
