@@ -25,15 +25,6 @@ from core.file_manager_desktop import (
     validate_desktop_output_path,
     create_backup_filename
 )
-# Mobile file manager imports
-from core.file_manager_mobile import (
-    MobilePDFFileManager, 
-    MobileFileOperationResult,
-    pick_files_mobile,
-    save_file_dialog_mobile,
-    format_file_size_mobile,
-    get_mobile_default_output_path,
-)
 
 # Constants for theming
 class Theme:
