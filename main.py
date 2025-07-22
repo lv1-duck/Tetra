@@ -13,14 +13,26 @@ from kivy.uix.textinput import TextInput
 from kivy.metrics import dp
 from kivy.clock import Clock
 
-# Import our modularized file manager
-from core.file_manager import (
-    PDFFileManager, 
+    
+# Desktop file manager imports
+from core.file_manager_desktop import (
+    DesktopPDFFileManager, 
     FileOperationResult,
     pick_files_desktop, 
+    save_file_dialog_desktop,
+    format_file_size,
+    get_desktop_default_output_path,
+    validate_desktop_output_path,
+    create_backup_filename
+)
+# Mobile file manager imports
+from core.file_manager_mobile import (
+    MobilePDFFileManager, 
+    MobileFileOperationResult,
     pick_files_mobile,
-    get_default_output_path,
-    format_file_size
+    save_file_dialog_mobile,
+    format_file_size_mobile,
+    get_mobile_default_output_path,
 )
 
 # Constants for theming
@@ -93,7 +105,10 @@ class FileItemWidget(RoundedBoxLayout):
         self.index = index
         
         # File info
-        file_info = BoxLayout(orientation='vertical', spacing=dp(2))
+        file_info = BoxLayout(orientation='vertical',
+                            spacing=dp(2),
+                            padding=[0, dp(5), 0, dp(5)],)
+    
         file_name = Label(
             text=f"{index + 1}. {os.path.basename(file_path)}",
             color=Theme.TEXT_PRIMARY,
@@ -117,7 +132,7 @@ class FileItemWidget(RoundedBoxLayout):
         
         # Remove button
         remove_btn = Button(
-            text="✕",
+            text="X",
             size_hint=(None, 1),
             width=dp(40),
             background_color=(0.8, 0.2, 0.2, 1),
@@ -159,8 +174,8 @@ class MainScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
-        # Initialize file manager
-        self.file_manager = PDFFileManager()
+        # Initialize desktop file manager
+        self.file_manager = DesktopPDFFileManager()
         self.file_manager.add_observer(self.on_file_list_changed)
         
         self.setup_ui()
@@ -190,7 +205,7 @@ class MainScreen(Screen):
             radius=Sizes.RADIUS_MEDIUM
         )
         header.add_widget(Label(
-            text="PDF Utility Tool",
+            text="PDF Utility Tool - Desktop",
             color=Theme.TEXT_PRIMARY,
             font_size=dp(24),
             bold=True
@@ -205,12 +220,12 @@ class MainScreen(Screen):
             spacing=Sizes.SPACING
         )
         
-        self.add_btn = StyledButton(text="Add Files", on_release=self.open_file_chooser)
-        self.merge_btn = StyledButton(text="Merge PDFs", on_release=self.show_merge_dialog)
-        self.clear_btn = StyledButton(text="Clear All", on_release=self.clear_files)
+        self.add_button = StyledButton(text="Add Files", on_release=self.open_file_chooser)
+        self.merge_button = StyledButton(text="Merge PDFs", on_release=self.show_merge_dialog)
+        self.clear_button = StyledButton(text="Clear All", on_release=self.clear_files)
         
-        for btn in (self.add_btn, self.merge_btn, self.clear_btn):
-            button_container.add_widget(btn)
+        for button in (self.add_button, self.merge_button, self.clear_button):
+            button_container.add_widget(button)
         
         self.master.add_widget(button_container)
         
@@ -222,7 +237,9 @@ class MainScreen(Screen):
             radius=Sizes.RADIUS_SMALL
         )
         
-        header_layout = BoxLayout(orientation='horizontal', padding=[dp(15), dp(12), dp(15), dp(12)])
+        header_layout = BoxLayout(orientation='horizontal',
+                                  padding=[dp(15), dp(12), dp(15), dp(12)])
+        
         self.files_count_label = Label(
             text="Selected Files (0)",
             color=Theme.TEXT_PRIMARY,
@@ -266,10 +283,8 @@ class MainScreen(Screen):
         self.update_file_list_display()
 
     def open_file_chooser(self, instance):
-        if platform in ('android', 'ios'):
-            pick_files_mobile(self.on_files_selected, platform)
-        else:
-            pick_files_desktop(self.on_files_selected)
+        """Open desktop file chooser"""
+        pick_files_desktop(self.on_files_selected)
 
     def on_files_selected(self, file_paths):
         if not file_paths:
@@ -326,30 +341,60 @@ class MainScreen(Screen):
         StatusPopup.show("Files Cleared", response.message)
 
     def show_merge_dialog(self, instance):
+        """Show merge dialog with filename input"""
         if self.file_manager.get_file_count() < 2:
             StatusPopup.show("Error", "Need at least 2 files to merge", is_error=True)
             return
         
         content = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(20))
         
+        # Title
         content.add_widget(Label(
-            text="Enter output filename:",
+            text="Enter filename for merged PDF:",
             size_hint_y=None,
-            height=dp(30)
+            height=dp(30),
+            color=Theme.TEXT_PRIMARY
         ))
         
+        # Filename input with default name
+        default_name = f"merged_document_{self.file_manager.get_file_count()}_files.pdf"
         filename_input = TextInput(
-            text="merged_document.pdf",
+            text=default_name,
             size_hint_y=None,
             height=dp(40),
-            multiline=False
+            multiline=False,
+            background_color=Theme.ITEM_BG,
+            foreground_color=Theme.TEXT_PRIMARY
         )
         content.add_widget(filename_input)
         
-        button_layout = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        # Info label
+        info_label = Label(
+            text="You'll choose the save location in the next step",
+            size_hint_y=None,
+            height=dp(30),
+            color=Theme.TEXT_SECONDARY,
+            font_size=dp(12)
+        )
+        content.add_widget(info_label)
         
-        cancel_btn = Button(text="Cancel", background_color=Theme.ERROR)
-        merge_btn = Button(text="Merge", background_color=Theme.SUCCESS)
+        # Button layout
+        button_layout = BoxLayout(
+            size_hint_y=None, 
+            height=dp(50), 
+            spacing=dp(10)
+        )
+        
+        cancel_btn = Button(
+            text="Cancel", 
+            background_color=Theme.ERROR,
+            color=Theme.TEXT_PRIMARY
+        )
+        merge_btn = Button(
+            text="Choose Location & Merge", 
+            background_color=Theme.SUCCESS,
+            color=Theme.TEXT_PRIMARY
+        )
         
         button_layout.add_widget(cancel_btn)
         button_layout.add_widget(merge_btn)
@@ -358,37 +403,263 @@ class MainScreen(Screen):
         popup = Popup(
             title="Merge PDFs",
             content=content,
-            size_hint=(0.8, 0.5)
+            size_hint=(0.9, 0.6),
+            background_color=Theme.BACKGROUND
         )
         
         cancel_btn.bind(on_release=popup.dismiss)
-        merge_btn.bind(on_release=lambda x: self.perform_merge(filename_input.text, popup))
+        merge_btn.bind(on_release=lambda x: self.choose_save_location_and_merge(filename_input.text.strip(), popup))
         
         popup.open()
 
-    def perform_merge(self, filename, popup):
+    def choose_save_location_and_merge(self, filename, popup):
+        """Choose save location and perform merge using desktop dialog"""
         popup.dismiss()
         
-        if not filename.strip():
+        # Validate filename
+        if not filename:
             StatusPopup.show("Error", "Please enter a filename", is_error=True)
             return
         
+        # Ensure .pdf extension
         if not filename.lower().endswith('.pdf'):
             filename += '.pdf'
         
-        output_path = os.path.join(os.path.dirname(get_default_output_path()), filename)
+        # Show loading popup immediately
+        self.show_loading_popup("Opening save dialog...")
         
-        response = self.file_manager.merge_pdfs(output_path)
-        
-        if response.result == FileOperationResult.SUCCESS:
-            StatusPopup.show("Merge Complete", response.message)
-        else:
-            StatusPopup.show("Merge Failed", response.message, is_error=True)
+        # Use Clock.schedule_once to avoid blocking the UI
+        Clock.schedule_once(lambda dt: self.perform_save_dialog(filename), 0.1)
 
+    def perform_save_dialog(self, filename):
+        """Perform the save dialog in a non-blocking way"""
+        try:
+            # Show desktop save dialog
+            output_path = save_file_dialog_desktop(filename)
+            
+            # Dismiss loading popup
+            self.dismiss_loading_popup()
+            
+            if output_path:
+                # Validate the path before proceeding
+                is_valid, message = validate_desktop_output_path(output_path)
+                if not is_valid:
+                    StatusPopup.show("Error", f"Invalid save location: {message}", is_error=True)
+                    return
+                
+                # Check if file exists and create backup if needed
+                if os.path.exists(output_path):
+                    backup_path = create_backup_filename(output_path)
+                    if backup_path != output_path:
+                        StatusPopup.show("Info", f"File exists, saving as {os.path.basename(backup_path)}")
+                        output_path = backup_path
+                
+                # User selected a location, proceed with merge
+                self.perform_merge_with_path(output_path)
+            else:
+                # User cancelled the save dialog
+                StatusPopup.show("Info", "Save cancelled by user")
+        
+        except Exception as e:
+            self.dismiss_loading_popup()
+            StatusPopup.show("Error", f"Error showing save dialog: {str(e)}", is_error=True)
+    
+    def perform_merge_with_path(self, output_path):
+        """Perform the actual PDF merge with the specified path"""
+        # Show progress popup
+        self.show_loading_popup(f"Merging {self.file_manager.get_file_count()} PDFs...")
+        
+        # Perform merge in a separate thread to avoid blocking UI
+        Clock.schedule_once(lambda dt: self.do_merge_operation(output_path), 0.1)
+
+    def do_merge_operation(self, output_path):
+        """Execute the merge operation"""
+        try:
+            response = self.file_manager.merge_pdfs(output_path)
+            
+            # Dismiss loading popup
+            self.dismiss_loading_popup()
+            
+            if response.result == FileOperationResult.SUCCESS:
+                # Show success with option to open file location
+                self.show_merge_success_dialog(output_path, response.message)
+            else:
+                StatusPopup.show("Error", response.message, is_error=True)
+        
+        except Exception as e:
+            self.dismiss_loading_popup()
+            StatusPopup.show("Error", f"Merge operation failed: {str(e)}", is_error=True)
+
+    def show_merge_success_dialog(self, output_path, message):
+        """Show success dialog with options to open file location"""
+        content = BoxLayout(orientation='vertical', spacing=dp(15), padding=dp(20))
+        
+        # Success message
+        success_label = Label(
+            text=message,
+            color=Theme.SUCCESS,
+            text_size=(dp(300), None),
+            halign='center'
+        )
+        content.add_widget(success_label)
+        
+        # File path info
+        path_label = Label(
+            text=f"Saved to:\n{output_path}",
+            color=Theme.TEXT_SECONDARY,
+            text_size=(dp(300), None),
+            halign='center',
+            font_size=dp(12)
+        )
+        content.add_widget(path_label)
+        
+        # Button layout
+        button_layout = BoxLayout(
+            size_hint_y=None, 
+            height=dp(50), 
+            spacing=dp(10)
+        )
+        
+        ok_btn = Button(
+            text="OK", 
+            background_color=Theme.SUCCESS,
+            color=Theme.TEXT_PRIMARY
+        )
+        
+        try:
+            # Try to add "Open Folder" button if we can open file explorer
+            import subprocess
+            import sys
+            
+            if sys.platform == "win32":
+                open_folder_btn = Button(
+                    text="Open Folder", 
+                    background_color=Theme.BUTTON_BG,
+                    color=Theme.TEXT_PRIMARY
+                )
+                button_layout.add_widget(open_folder_btn)
+            elif sys.platform == "darwin":
+                open_folder_btn = Button(
+                    text="Show in Finder", 
+                    background_color=Theme.BUTTON_BG,
+                    color=Theme.TEXT_PRIMARY
+                )
+                button_layout.add_widget(open_folder_btn)
+            else:  # Linux
+                open_folder_btn = Button(
+                    text="Open Folder", 
+                    background_color=Theme.BUTTON_BG,
+                    color=Theme.TEXT_PRIMARY
+                )
+                button_layout.add_widget(open_folder_btn)
+        except:
+            open_folder_btn = None
+        
+        button_layout.add_widget(ok_btn)
+        content.add_widget(button_layout)
+        
+        popup = Popup(
+            title="Merge Successful!",
+            content=content,
+            size_hint=(0.8, 0.6),
+            background_color=Theme.BACKGROUND
+        )
+        
+        ok_btn.bind(on_release=popup.dismiss)
+        
+        if 'open_folder_btn' in locals() and open_folder_btn:
+            open_folder_btn.bind(on_release=lambda x: self.open_file_location(output_path))
+        
+        popup.open()
+
+    def open_file_location(self, file_path):
+        """Open file location in system file manager"""
+        try:
+            import subprocess
+            import sys
+            
+            if sys.platform == "win32":
+                subprocess.run(f'explorer /select,"{file_path}"', shell=True)
+            elif sys.platform == "darwin":
+                subprocess.run(["open", "-R", file_path])
+            else:  # Linux
+                subprocess.run(["xdg-open", os.path.dirname(file_path)])
+        except Exception as e:
+            StatusPopup.show("Error", f"Could not open file location: {str(e)}", is_error=True)
+
+    # Helper methods for loading popups
+    def show_loading_popup(self, message="Please wait..."):
+        """Show a loading popup with spinner"""
+        if hasattr(self, '_loading_popup') and self._loading_popup:
+            return  # Already showing
+        
+        content = BoxLayout(
+            orientation='vertical', 
+            spacing=dp(15), 
+            padding=dp(30)
+        )
+        
+        # Loading message
+        loading_label = Label(
+            text=message,
+            color=Theme.TEXT_PRIMARY,
+            font_size=dp(16),
+            text_size=(dp(250), None),
+            halign='center'
+        )
+        content.add_widget(loading_label)
+        
+        # Simple loading indicator
+        spinner_label = Label(
+            text="⟳",  # Unicode spinner character
+            color=Theme.BUTTON_BG,
+            font_size=dp(30)
+        )
+        content.add_widget(spinner_label)
+        
+        self._loading_popup = Popup(
+            title="Processing...",
+            content=content,
+            size_hint=(0.7, 0.4),
+            auto_dismiss=False,  # Don't allow dismissing
+            background_color=Theme.BACKGROUND
+        )
+        
+        self._loading_popup.open()
+        
+        # Animate the spinner
+        self._start_spinner_animation(spinner_label)
+
+    def dismiss_loading_popup(self):
+        """Dismiss the loading popup"""
+        if hasattr(self, '_loading_popup') and self._loading_popup:
+            self._loading_popup.dismiss()
+            self._loading_popup = None
+            
+            # Stop spinner animation
+            if hasattr(self, '_spinner_event') and self._spinner_event:
+                self._spinner_event.cancel()
+                self._spinner_event = None
+
+    def _start_spinner_animation(self, spinner_label):
+        """Simple spinner animation"""
+        spinner_chars = ["⟳", "⟲", "⟳", "⟲"]
+        self._spinner_index = 0
+        
+        def update_spinner(dt):
+            if hasattr(self, '_loading_popup') and self._loading_popup:
+                self._spinner_index = (self._spinner_index + 1) % len(spinner_chars)
+                spinner_label.text = spinner_chars[self._spinner_index]
+                return True
+            else:
+                return False  # Stop the animation
+        
+        self._spinner_event = Clock.schedule_interval(update_spinner, 0.3)
+    
 
 class PDFApp(App):
     def build(self):
-        self.title = "PDF Utility Tool"
+        self.title = "PDF Utility Tool - Desktop"
         sm = ScreenManager()
         sm.add_widget(MainScreen(name='main'))
         return sm

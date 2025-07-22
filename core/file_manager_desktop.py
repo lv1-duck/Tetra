@@ -1,10 +1,9 @@
 """
-File management module for PDF operations
-Handles file selection, validation, and PDF operations
+Desktop File Management Module for PDF operations
+Handles file selection, validation, and PDF operations for desktop platforms (Windows, macOS, Linux)
 """
 
 import os
-from plyer import filechooser # mobile file picking
 from typing import List, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -29,8 +28,8 @@ class FileOperationResponse:
     data: Optional[any] = None
 
 
-class PDFFileManager:
-    """Manages PDF file operations and maintains file list state"""
+class DesktopPDFFileManager:
+    """Manages PDF file operations and maintains file list state for desktop platforms"""
     
     def __init__(self):
         self.selected_files: List[str] = []
@@ -216,8 +215,9 @@ class PDFFileManager:
             return False
 
 
-# Platform-specific file picking functions
+# Desktop-specific file picking functions
 def pick_files_desktop(callback: Callable[[List[str]], None]):
+    """Desktop file picker using tkinter"""
     try:
         from tkinter import filedialog
         import tkinter as tk
@@ -238,40 +238,60 @@ def pick_files_desktop(callback: Callable[[List[str]], None]):
         callback([])
 
 
-def request_storage_permissions(platform: str):
-    if platform == 'android':
-        from android.permissions import request_permissions, Permission # type: ignore
-        request_permissions([Permission.READ_EXTERNAL_STORAGE])
-    elif platform == 'ios':
-        # TODO: handle iOS or desktop cases if needed 
-        pass
-    else:
-        # For desktop platforms, no permissions are needed
-        pass
+def choose_directory_desktop() -> Optional[str]:
+    """Desktop directory chooser using tkinter"""
+    try:
+        from tkinter import filedialog
+        import tkinter as tk
+        
+        root = tk.Tk()
+        root.withdraw()  # Hide the main window
+        
+        directory = filedialog.askdirectory(title="Select Directory")
+        root.destroy()
+        return directory if directory else None
+        
+    except ImportError:
+        print("tkinter not available for directory picker")
+        return None
 
 
-def pick_files_mobile(callback: Callable[[List[str]], None], platform: str):
-    # This would need platform-specific implementation
-    
-    if platform == 'android' or platform == 'ios':
-        # Use plyer for Android file picking
-        try:
-            files = filechooser.open_file(
-                title="Select PDF Files",
-                filters=[('PDF files', '*.pdf')]
-            )
-            callback(files if files else [])
-        except Exception as e:
-            callback([])
-            
-    else:
-        print("Unsupported platform for mobile file picker")
-        callback([])
-        return
+def save_file_dialog_desktop(default_filename: str = "merged_document.pdf") -> Optional[str]:
+    """
+    Desktop save dialog using tkinter
+    Returns the full path where user wants to save the file, or None if cancelled
+    """
+    try:
+        from tkinter import filedialog
+        import tkinter as tk
+        
+        root = tk.Tk()
+        root.withdraw()  # Hide the main window
+        
+        # Show save dialog with default filename
+        file_path = filedialog.asksaveasfilename(
+            title="Save Merged PDF As...",
+            defaultextension=".pdf",
+            filetypes=[
+                ("PDF files", "*.pdf"),
+                ("All files", "*.*")
+            ],
+            initialvalue=default_filename
+        )
+        
+        root.destroy()
+        return file_path if file_path else None
+        
+    except ImportError:
+        print("tkinter not available for save dialog")
+        return None
+    except Exception as e:
+        print(f"Desktop save dialog error: {e}")
+        return None
 
 
-# Utility functions
-def get_default_output_path() -> str:
+def get_desktop_default_output_path() -> str:
+    """Get default output path for merged PDF on desktop"""
     desktop = os.path.join(os.path.expanduser("~"), "Desktop")
     if os.path.exists(desktop):
         return os.path.join(desktop, "merged_document.pdf")
@@ -279,7 +299,55 @@ def get_default_output_path() -> str:
         return os.path.join(os.path.expanduser("~"), "merged_document.pdf")
 
 
+def get_desktop_safe_path() -> str:
+    """Get a desktop-appropriate safe path for file operations"""
+    desktop_paths = [
+        os.path.join(os.path.expanduser("~"), "Desktop"),
+        os.path.join(os.path.expanduser("~"), "Documents"),
+        os.path.expanduser("~"),
+        os.getcwd()
+    ]
+    
+    for path in desktop_paths:
+        if os.path.exists(path) and os.access(path, os.W_OK):
+            return path
+    
+    # Ultimate fallback
+    return os.getcwd()
+
+
+def validate_desktop_output_path(output_path: str) -> tuple[bool, str]:
+    """
+    Validate if the output path is writable on desktop platforms
+    Returns (is_valid, error_message)
+    """
+    try:
+        # Check if path exists
+        if not os.path.exists(output_path):
+            # Try to create the directory
+            try:
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            except Exception as e:
+                return False, f"Cannot create directory: {e}"
+        
+        # Check if we can write to the location
+        directory = os.path.dirname(output_path)
+        if not os.access(directory, os.W_OK):
+            return False, f"No write permission for directory: {directory}"
+        
+        # Check if file already exists and is writable
+        if os.path.exists(output_path):
+            if not os.access(output_path, os.W_OK):
+                return False, f"File exists but is not writable: {output_path}"
+        
+        return True, "Path is valid"
+    
+    except Exception as e:
+        return False, f"Path validation error: {e}"
+
+
 def format_file_size(file_path: str) -> str:
+    """Format file size in human readable format"""
     try:
         size = os.path.getsize(file_path)
         for unit in ['B', 'KB', 'MB', 'GB']:
@@ -289,3 +357,36 @@ def format_file_size(file_path: str) -> str:
         return "Massive file size"
     except:
         return "Unknown size"
+
+
+def create_backup_filename(original_path: str) -> str:
+    """
+    Create a backup filename if the original already exists
+    Returns a new filename with timestamp or counter
+    """
+    if not os.path.exists(original_path):
+        return original_path
+    
+    directory = os.path.dirname(original_path)
+    filename = os.path.basename(original_path)
+    name, ext = os.path.splitext(filename)
+    
+    # Try with timestamp first
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = os.path.join(directory, f"{name}_{timestamp}{ext}")
+    
+    if not os.path.exists(backup_path):
+        return backup_path
+    
+    # If timestamp version exists, use counter
+    counter = 1
+    while True:
+        backup_path = os.path.join(directory, f"{name}_{counter:03d}{ext}")
+        if not os.path.exists(backup_path):
+            return backup_path
+        counter += 1
+        if counter > 999:  # Safety limit
+            break
+    
+    return original_path  # Fallback to original
