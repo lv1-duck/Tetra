@@ -1,5 +1,6 @@
 from kivy.uix.boxlayout import BoxLayout
-
+from PIL import Image
+from kivy.uix.image import Image as KivyImage
 
 class ViewerScreen(BoxLayout):
     def __init__(self, **kwargs):
