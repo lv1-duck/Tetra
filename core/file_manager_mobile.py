@@ -3,13 +3,14 @@ Mobile File Management Module for PDF operations
 Handles file selection, validation, and PDF operations for mobile platforms (Android, iOS)
 """
 
+# IMPORTS AND DEPENDENCIES
 import os
 from typing import List, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
 
 try:
-    from plyer import filechooser  # mobile file picking
+    from plyer import filechooser  # MOBILE FILE PICKING
     PLYER_AVAILABLE = True
 except ImportError:
     PLYER_AVAILABLE = False
@@ -21,12 +22,14 @@ except ImportError:
     PDF_LIBRARY_AVAILABLE = False
 
 
+# ENUM FOR FILE OPERATION RESULTS
 class FileOperationResult(Enum):
     SUCCESS = "success"
     ERROR = "error"
     CANCELLED = "cancelled"
 
 
+# DATACLASS FOR FILE OPERATION RESPONSE
 @dataclass
 class FileOperationResponse:
     result: FileOperationResult
@@ -34,33 +37,33 @@ class FileOperationResponse:
     data: Optional[any] = None
 
 
+# MANAGES PDF FILE OPERATIONS AND MAINTAINS FILE LIST STATE FOR MOBILE PLATFORMS
 class MobilePDFFileManager:
-    """Manages PDF file operations and maintains file list state for mobile platforms"""
-    
+    # INITIALIZE MANAGER WITH PLATFORM AND OBSERVERS
     def __init__(self, platform: str = 'android'):
         self.selected_files: List[str] = []
         self._observers: List[Callable] = []
         self.platform = platform
     
+    # ADD OBSERVER FOR FILE LIST CHANGES
     def add_observer(self, callback: Callable):
-        """Add observer for file list changes"""
         self._observers.append(callback)
     
+    # REMOVE OBSERVER
     def remove_observer(self, callback: Callable):
-        """Remove observer"""
         if callback in self._observers:
             self._observers.remove(callback)
     
+    # NOTIFY ALL OBSERVERS OF FILE LIST CHANGES
     def _notify_observers(self):
-        """Notify all observers of file list changes"""
         for callback in self._observers:
             try:
                 callback(self.selected_files.copy())
             except Exception as e:
                 print(f"Observer notification error: {e}")
     
+    # ADD FILES TO THE SELECTION WITH VALIDATION
     def add_files(self, file_paths: List[str]) -> FileOperationResponse:
-        """Add files to the selection, with validation"""
         if not file_paths:
             return FileOperationResponse(
                 FileOperationResult.ERROR,
@@ -105,8 +108,8 @@ class MobilePDFFileManager:
                 f"No valid files added. Issues: {', '.join(invalid_files)}"
             )
     
+    # REMOVE FILE AT SPECIFIC INDEX
     def remove_file(self, index: int) -> FileOperationResponse:
-        """Remove file at specific index"""
         if not 0 <= index < len(self.selected_files):
             return FileOperationResponse(
                 FileOperationResult.ERROR,
@@ -121,8 +124,8 @@ class MobilePDFFileManager:
             f"Removed {removed_file}"
         )
     
+    # CLEAR ALL SELECTED FILES
     def clear_files(self) -> FileOperationResponse:
-        """Clear all selected files"""
         count = len(self.selected_files)
         self.selected_files.clear()
         self._notify_observers()
@@ -132,8 +135,8 @@ class MobilePDFFileManager:
             f"Cleared {count} files"
         )
     
+    # MOVE FILE FROM ONE POSITION TO ANOTHER
     def move_file(self, from_index: int, to_index: int) -> FileOperationResponse:
-        """Move file from one position to another"""
         if not (0 <= from_index < len(self.selected_files) and 
                 0 <= to_index < len(self.selected_files)):
             return FileOperationResponse(
@@ -150,16 +153,16 @@ class MobilePDFFileManager:
             "File reordered successfully"
         )
     
+    # GET COPY OF CURRENT FILE LIST
     def get_files(self) -> List[str]:
-        """Get copy of current file list"""
         return self.selected_files.copy()
     
+    # GET NUMBER OF SELECTED FILES
     def get_file_count(self) -> int:
-        """Get number of selected files"""
         return len(self.selected_files)
     
+    # MERGE ALL SELECTED PDFS INTO ONE FILE
     def merge_pdfs(self, output_path: str) -> FileOperationResponse:
-        """Merge all selected PDFs into one file"""
         if not PDF_LIBRARY_AVAILABLE:
             return FileOperationResponse(
                 FileOperationResult.ERROR,
@@ -172,7 +175,6 @@ class MobilePDFFileManager:
                 "Need at least 2 files to merge"
             )
         
-        # Validate output path for mobile platform
         is_valid, error_msg = validate_mobile_output_path(output_path, self.platform)
         if not is_valid:
             return FileOperationResponse(
@@ -191,7 +193,6 @@ class MobilePDFFileManager:
                     )
                 merger.append(file_path)
             
-            # Ensure output directory exists
             output_dir = os.path.dirname(output_path)
             if output_dir and not os.path.exists(output_dir):
                 os.makedirs(output_dir)
@@ -212,9 +213,9 @@ class MobilePDFFileManager:
                 f"Merge failed: {str(e)}"
             )
     
+    # BASIC PDF VALIDATION CHECK
     def _is_valid_pdf(self, file_path: str) -> bool:
         if not PDF_LIBRARY_AVAILABLE:
-            # Basic check without library
             try:
                 with open(file_path, 'rb') as f:
                     header = f.read(4)
@@ -230,21 +231,17 @@ class MobilePDFFileManager:
             return False
 
 
-# Mobile-specific file operations
+# REQUEST BASIC STORAGE PERMISSIONS FOR MOBILE PLATFORMS
 def request_storage_permissions(platform: str) -> bool:
-    """
-    Basic storage permissions request
-    Returns True if permissions are available, False otherwise
-    """
     if platform == 'android':
         try:
-            from android.permissions import request_permissions, Permission, check_permission  # type: ignore
+            from android.permissions import (request_permissions, #type: ignore
+                                              Permission,
+                                              check_permission)
             
-            # Check if we already have permission
             if check_permission(Permission.WRITE_EXTERNAL_STORAGE):
                 return True
             
-            # Request both read and write permissions
             request_permissions([
                 Permission.READ_EXTERNAL_STORAGE,
                 Permission.WRITE_EXTERNAL_STORAGE
@@ -260,36 +257,27 @@ def request_storage_permissions(platform: str) -> bool:
             return False
     
     elif platform == 'ios':
-        # iOS typically handles permissions through the system
         return True
     
     else:
-        # Other platforms don't need special storage permissions
         return True
 
-
+# ENHANCED STORAGE PERMISSIONS REQUEST WITH BETTER ERROR HANDLING
 def request_storage_permissions_enhanced(platform: str) -> bool:
-    """
-    Enhanced storage permissions request with better error handling
-    Returns True if permissions are available, False otherwise
-    """
     if platform == 'android':
         try:
             from android.permissions import request_permissions, Permission, check_permission  # type: ignore
             
-            # List of permissions we need
             required_permissions = [
                 Permission.READ_EXTERNAL_STORAGE,
                 Permission.WRITE_EXTERNAL_STORAGE
             ]
             
-            # Check if we already have all permissions
             all_granted = all(check_permission(perm) for perm in required_permissions)
             if all_granted:
                 print("All storage permissions already granted")
                 return True
             
-            # Request missing permissions
             print("Requesting storage permissions...")
             request_permissions(required_permissions)
             
@@ -303,18 +291,16 @@ def request_storage_permissions_enhanced(platform: str) -> bool:
             return False
     
     elif platform == 'ios':
-        print("iOS platform detected - using system permission handling")
+        print("IOS PLATFORM DETECTED - USING SYSTEM PERMISSION HANDLING")
         return True
     
     else:
-        print(f"Platform {platform} - no explicit permissions needed")
+        print(f"PLATFORM {platform} - NO EXPLICIT PERMISSIONS NEEDED")
         return True
 
-
+# GET AND RETURN ANDROID DOWNLOADS DIRECTORY PATH
 def get_android_downloads_dir() -> Optional[str]:
-    """Get Android Downloads directory path"""
     try:
-        # Try different common Android paths
         possible_paths = [
             "/storage/emulated/0/Download",
             "/storage/emulated/0/Downloads", 
@@ -326,7 +312,6 @@ def get_android_downloads_dir() -> Optional[str]:
             if os.path.exists(path) and os.access(path, os.W_OK):
                 return path
         
-        # Fallback: try to use Android-specific API
         try:
             from android.storage import primary_external_storage_path  # type: ignore
             downloads_path = os.path.join(primary_external_storage_path(), "Download")
@@ -340,24 +325,21 @@ def get_android_downloads_dir() -> Optional[str]:
         print(f"Error getting Android downloads directory: {e}")
         return None
 
-
+# GET IOS APP DOCUMENTS DIRECTORY PATH
 def get_ios_documents_dir() -> Optional[str]:
-    """Get iOS app documents directory path"""
     try:
-        # On iOS, typically save to the app's Documents directory
         documents_path = os.path.expanduser("~/Documents")
         if os.path.exists(documents_path):
             return documents_path
         return None
     except Exception as e:
-        print(f"Error getting iOS documents directory: {e}")
+        print(f"Error getting IOS documents directory: {e}")
         return None
 
-
+# MOBILE DIRECTORY CHOOSER USING PLYER
 def choose_directory_mobile(platform: str) -> Optional[str]:
-    """Mobile directory chooser using plyer"""
     if not PLYER_AVAILABLE:
-        print("plyer not available for mobile directory selection")
+        print("PLYER NOT AVAILABLE FOR MOBILE DIRECTORY SELECTION")
         return None
     
     try:
@@ -367,24 +349,20 @@ def choose_directory_mobile(platform: str) -> Optional[str]:
         print(f"Directory selection failed: {e}")
         return None
 
-
+# BASIC MOBILE FILE PICKING FUNCTION
 def pick_files_mobile(callback: Callable[[List[str]], None], platform: str):
-    """
-    Basic mobile file picking function
-    """
     if not PLYER_AVAILABLE:
-        print("plyer not available for mobile file picking")
+        print("PLYER NOT AVAILABLE FOR MOBILE FILE PICKING")
         callback([])
         return
     
     if platform not in ['android', 'ios']:
-        print(f"Platform {platform} not supported for mobile file picking")
+        print(f"PLATFORM {platform} NOT SUPPORTED FOR MOBILE FILE PICKING")
         callback([])
         return
     
-    # Request permissions first
     if not request_storage_permissions(platform):
-        print("Storage permissions not available")
+        print("STORAGE PERMISSIONS NOT AVAILABLE")
     
     try:
         files = filechooser.open_file(
@@ -394,7 +372,6 @@ def pick_files_mobile(callback: Callable[[List[str]], None], platform: str):
         )
         
         if files:
-            # Validate that all selected files are PDFs and exist
             valid_files = []
             for file_path in files:
                 if os.path.exists(file_path) and file_path.lower().endswith('.pdf'):
@@ -404,31 +381,27 @@ def pick_files_mobile(callback: Callable[[List[str]], None], platform: str):
             
             callback(valid_files)
         else:
-            print("No files selected")
+            print("NO FILES SELECTED")
             callback([])
             
     except Exception as e:
-        print(f"Mobile file picker error: {e}")
+        print(f"MOBILE FILE PICKER ERROR: {e}")
         callback([])
 
-
+# ENHANCED MOBILE FILE PICKING WITH COMPREHENSIVE ERROR HANDLING
 def pick_files_mobile_enhanced(callback: Callable[[List[str]], None], platform: str):
-    """
-    Enhanced mobile file picking with comprehensive error handling and permission management
-    """
     if not PLYER_AVAILABLE:
-        print("plyer not available for mobile file picking")
+        print("PLYER NOT AVAILABLE FOR MOBILE FILE PICKING")
         callback([])
         return
     
     if platform not in ['android', 'ios']:
-        print(f"Platform {platform} not supported for mobile file picking")
+        print(f"PLATFORM {platform} NOT SUPPORTED FOR MOBILE FILE PICKING")
         callback([])
         return
     
-    # Request permissions first with enhanced error handling
     if not request_storage_permissions_enhanced(platform):
-        print("Storage permissions not available - attempting fallback")
+        print("STORAGE PERMISSIONS NOT AVAILABLE - ATTEMPTING FALLBACK")
     
     try:
         files = filechooser.open_file(
@@ -438,7 +411,6 @@ def pick_files_mobile_enhanced(callback: Callable[[List[str]], None], platform: 
         )
         
         if files:
-            # Validate that all selected files are PDFs and exist
             valid_files = []
             for file_path in files:
                 if os.path.exists(file_path) and file_path.lower().endswith('.pdf'):
@@ -448,31 +420,25 @@ def pick_files_mobile_enhanced(callback: Callable[[List[str]], None], platform: 
             
             callback(valid_files)
         else:
-            print("No files selected")
+            print("NO FILES SELECTED")
             callback([])
             
     except Exception as e:
-        print(f"Mobile file picker error: {e}")
+        print(f"MOBILE FILE PICKER ERROR: {e}")
         callback([])
 
-
+# MOBILE SAVE DIALOG USING PLYER
 def save_file_dialog_mobile(default_filename: str = "merged_document.pdf", platform: str = "android") -> Optional[str]:
-    """
-    Mobile save dialog using plyer
-    Returns the full path where user wants to save the file, or None if cancelled
-    """
     if not PLYER_AVAILABLE:
-        print("plyer not available for mobile save dialog")
+        print("PLYER NOT AVAILABLE FOR MOBILE SAVE DIALOG")
         return None
-    
+
     try:
         if platform == 'android':
-            # Request storage permissions first
             if not request_storage_permissions(platform):
-                print("Storage permissions not available")
+                print("STORAGE PERMISSIONS NOT AVAILABLE")
                 return None
             
-            # On Android, let user choose directory first
             try:
                 directories = filechooser.choose_dir(title="Choose Save Location")
                 
@@ -480,36 +446,32 @@ def save_file_dialog_mobile(default_filename: str = "merged_document.pdf", platf
                     chosen_dir = directories[0]
                     return os.path.join(chosen_dir, default_filename)
                 else:
-                    # Fallback to default Downloads directory
                     downloads_dir = get_android_downloads_dir()
                     return os.path.join(downloads_dir, default_filename) if downloads_dir else None
                     
             except Exception as e:
-                print(f"Android directory chooser failed: {e}")
-                # Fallback to default location
+                print(f"ANDROID DIRECTORY CHOOSER FAILED: {e}")
                 downloads_dir = get_android_downloads_dir()
                 return os.path.join(downloads_dir, default_filename) if downloads_dir else None
         
         elif platform == 'ios':
-            # iOS has different file access patterns
             try:
                 documents_dir = get_ios_documents_dir()
                 return os.path.join(documents_dir, default_filename) if documents_dir else None
             except Exception as e:
-                print(f"iOS save location error: {e}")
+                print(f"IOS SAVE LOCATION ERROR: {e}")
                 return None
         
         else:
-            print(f"Unsupported mobile platform: {platform}")
+            print(f"UNSUPPORTED MOBILE PLATFORM: {platform}")
             return None
             
     except Exception as e:
-        print(f"Mobile save dialog error: {e}")
+        print(f"MOBILE SAVE DIALOG ERROR: {e}")
         return None
 
-
+# GET DEFAULT OUTPUT PATH FOR MERGED PDF ON MOBILE
 def get_mobile_default_output_path(platform: str) -> str:
-    """Get default output path for merged PDF on mobile"""
     if platform == 'android':
         downloads_dir = get_android_downloads_dir()
         return os.path.join(downloads_dir, "merged_document.pdf") if downloads_dir else "/sdcard/merged_document.pdf"
@@ -521,27 +483,9 @@ def get_mobile_default_output_path(platform: str) -> str:
     else:
         return "merged_document.pdf"
 
-
-def get_mobile_safe_path(platform: str) -> str:
-    """Get a mobile-appropriate safe path for file operations"""
-    try:
-        if platform == 'android':
-            # Try multiple Android paths in order of preference
-            android_paths = [
-                get_android_downloads_dir(),
-                "/storage/emulated/0/Documents",
-                "/sdcard/Documents"]
-    except Exception as e:
-        print(f"Error getting Android safe path: {e}")
-        return "/sdcard/Documents"      
-
+# VALIDATE OUTPUT PATH FOR MOBILE PLATFORMS
 def validate_mobile_output_path(output_path, platform):
-    """
-    Validate output path for mobile platforms
-    Returns (is_valid: bool, error_message: str)
-    """
     if platform == 'android':
-        # Check if the path is writable
         if not os.path.exists(output_path):
             try:
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -554,7 +498,6 @@ def validate_mobile_output_path(output_path, platform):
         return True, ""
     
     elif platform == 'ios':
-        # iOS typically allows writing to app's Documents directory
         if not os.path.exists(output_path):
             try:
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -564,4 +507,4 @@ def validate_mobile_output_path(output_path, platform):
         return True, ""
     
     else:
-        return False, "Unsupported platform for output validation" 
+        return False, "Unsupported platform for output validation"
