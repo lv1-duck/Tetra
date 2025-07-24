@@ -12,6 +12,7 @@ from kivy.uix.popup import Popup
 from kivy.uix.textinput import TextInput
 from kivy.metrics import dp
 from kivy.clock import Clock
+from dataclasses import dataclass
 
     
 # DESKTOP FILE MANAGER MODULE
@@ -26,6 +27,7 @@ from core.file_manager_desktop import (
 )
 
 # CLASSES FOR CONSTANTS
+@dataclass
 class Theme:
     BACKGROUND = (30/255, 31/255, 40/255, 1)
     HEADER_BG = (46/255, 47/255, 62/255, 1)
@@ -37,6 +39,7 @@ class Theme:
     SUCCESS = (0.2, 0.8, 0.2, 1)
     ERROR = (0.8, 0.2, 0.2, 1)
 
+@dataclass
 class Sizes:
     PADDING = dp(15)
     SPACING = dp(12)
@@ -457,16 +460,14 @@ class MainScreen(Screen):
             color=Theme.TEXT_PRIMARY
         )
         try:
-            import sys
-            
-            if sys.platform == "win32":
+            if platform == "win32":
                 open_folder_btn = Button(
                     text="Open Folder", 
                     background_color=Theme.BUTTON_BG,
                     color=Theme.TEXT_PRIMARY
                 )
                 button_layout.add_widget(open_folder_btn)
-            elif sys.platform == "darwin":
+            elif platform == "darwin":
                 open_folder_btn = Button(
                     text="Show in Finder", 
                     background_color=Theme.BUTTON_BG,
@@ -572,7 +573,7 @@ class PDFApp(App):
         self.title = "PDF Utility Tool - Desktop"
         sm = ScreenManager()
         sm.add_widget(MainScreen(name='main'))
-        return sm
+        return sm  
 
 if __name__ == "__main__":
     PDFApp().run()

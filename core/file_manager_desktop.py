@@ -388,5 +388,6 @@ def create_backup_filename(original_path: str) -> str:
         counter += 1
         if counter > 999:  # Safety limit
             break
-    
+
+
     return original_path  # Fallback to original
