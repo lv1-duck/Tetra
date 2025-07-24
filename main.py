@@ -6,14 +6,15 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.widget import Widget
 from kivy.graphics import Color, RoundedRectangle
 from kivy.uix.popup import Popup
 from kivy.uix.textinput import TextInput
 from kivy.metrics import dp
 from kivy.clock import Clock
-from dataclasses import dataclass
 
+from ui.status_popup import StatusPopup
+from ui.ui_constants import Theme, Sizes
+from ui.ui_components import RoundedBoxLayout, StyledButton, FileItemWidget
     
 # DESKTOP FILE MANAGER MODULE
 from core.file_manager_desktop import (
@@ -21,138 +22,11 @@ from core.file_manager_desktop import (
     FileOperationResult,
     pick_files_desktop, 
     save_file_dialog_desktop,
-    format_file_size,
     validate_desktop_output_path,
     create_backup_filename
 )
 
-# CLASSES FOR CONSTANTS
-@dataclass
-class Theme:
-    BACKGROUND = (30/255, 31/255, 40/255, 1)
-    HEADER_BG = (46/255, 47/255, 62/255, 1)
-    BUTTON_BG = (45/255, 95/255, 145/255, 1)
-    LIST_BG = (41/255, 43/255, 62/255, 1)
-    ITEM_BG = (52/255, 54/255, 73/255, 1)
-    TEXT_PRIMARY = (1, 1, 1, 1)
-    TEXT_SECONDARY = (0.7, 0.7, 0.7, 1)
-    SUCCESS = (0.2, 0.8, 0.2, 1)
-    ERROR = (0.8, 0.2, 0.2, 1)
 
-@dataclass
-class Sizes:
-    PADDING = dp(15)
-    SPACING = dp(12)
-    HEADER_HEIGHT = dp(50)
-    BUTTON_HEIGHT = dp(60)
-    LIST_ITEM_HEIGHT = dp(55)
-    RADIUS_LARGE = dp(25)
-    RADIUS_MEDIUM = dp(18)
-    RADIUS_SMALL = dp(12)
-
-
-
-# CLASSES FOR UI COMPONENTS
-class RoundedBoxLayout(BoxLayout):
-    def __init__(self, bg_color=(1, 1, 1, 1), radius=15, **kwargs):
-        super().__init__(**kwargs)
-        self.bg_color = bg_color
-        self.radius = dp(radius)
-        with self.canvas.before:
-            Color(*self.bg_color)
-            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[self.radius])
-        self.bind(pos=self.update_rect, size=self.update_rect)
-
-    def update_rect(self, *args):
-        self.rect.pos = self.pos
-        self.rect.size = self.size
-
-class StyledButton(Button):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.background_color = (0, 0, 0, 0)  # Transparent
-        with self.canvas.before:
-            Color(*Theme.BUTTON_BG)
-            self.rect = RoundedRectangle(pos=self.pos, size=self.size, radius=[Sizes.RADIUS_MEDIUM])
-        self.bind(pos=self.update_graphics, size=self.update_graphics)
-        self.color = Theme.TEXT_PRIMARY
-
-    def update_graphics(self, *args):
-        self.rect.pos = self.pos
-        self.rect.size = self.size
-
-class FileItemWidget(RoundedBoxLayout):
-    def __init__(self, file_path, index, on_remove_callback, **kwargs):
-        super().__init__(
-            orientation='horizontal',
-            bg_color=Theme.ITEM_BG,
-            radius=Sizes.RADIUS_SMALL,
-            size_hint_y=None,
-            height=Sizes.LIST_ITEM_HEIGHT,
-            padding=[dp(10), 0],
-            spacing=dp(10),
-            **kwargs
-        )
-        self.file_path = file_path
-        self.index = index
-        # FILE INFORMATION
-        file_info = BoxLayout(orientation='vertical',
-                            spacing=dp(2),
-                            padding=[0, dp(5), 0, dp(5)],)
-    
-        file_name = Label(
-            text=f"{index + 1}. {os.path.basename(file_path)}",
-            color=Theme.TEXT_PRIMARY,
-            font_size=dp(14),
-            halign='left',
-            size_hint_y=0.6
-        )
-        file_name.bind(size=file_name.setter('text_size'))
-        file_size = Label(
-            text=format_file_size(file_path),
-            color=Theme.TEXT_SECONDARY,
-            font_size=dp(11),
-            halign='left',
-            size_hint_y=0.4
-        )
-        file_size.bind(size=file_size.setter('text_size'))
-        file_info.add_widget(file_name)
-        file_info.add_widget(file_size)
-        # X BUTTON
-        remove_btn = Button(
-            text="X",
-            size_hint=(None, 1),
-            width=dp(40),
-            background_color=(0.8, 0.2, 0.2, 1),
-            color=Theme.TEXT_PRIMARY
-        )
-        remove_btn.bind(on_release=lambda x: on_remove_callback(index))
-        
-        self.add_widget(file_info)
-        self.add_widget(remove_btn)
-
-class StatusPopup:
-    @staticmethod
-    def show(title, message, is_error=False):
-        color = Theme.ERROR if is_error else Theme.SUCCESS
-        content = BoxLayout(orientation='vertical', spacing=dp(10))
-        label = Label(
-            text=message,
-            color=color,
-            text_size=(dp(300), None),
-            halign='center'
-        )
-        content.add_widget(label)
-        popup = Popup(
-            title=title,
-            content=content,
-            size_hint=(0.8, 0.4),
-            auto_dismiss=True
-        )
-        popup.open()
-        # AUTODISMISS IN 3 SECONDS
-        Clock.schedule_once(lambda dt: popup.dismiss(), 3)
- 
 
 
 # MAINSCREEN

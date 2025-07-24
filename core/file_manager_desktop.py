@@ -1,12 +1,16 @@
 """
 Desktop File Management Module for PDF operations
 Handles file selection, validation, and PDF operations for desktop platforms (Windows, macOS, Linux)
+Now uses Kivy popups for file dialogs instead of tkinter.
 """
 
 import os
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Any
 from dataclasses import dataclass
 from enum import Enum
+from datetime import datetime
+
+from ui.status_popup import StatusPopup
 
 try:
     import PyPDF2
@@ -14,380 +18,271 @@ try:
 except ImportError:
     PDF_LIBRARY_AVAILABLE = False
 
+from kivy.uix.popup import Popup
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
+from kivy.uix.label import Label
+from kivy.uix.textinput import TextInput
+from kivy.uix.filechooser import FileChooserListView
+from kivy.metrics import dp
+from kivy.clock import Clock
 
+# Result types for file operations
 class FileOperationResult(Enum):
     SUCCESS = "success"
     ERROR = "error"
     CANCELLED = "cancelled"
 
-
 @dataclass
 class FileOperationResponse:
     result: FileOperationResult
     message: str
-    data: Optional[any] = None
-
+    data: Optional[Any] = None
 
 class DesktopPDFFileManager:
     """Manages PDF file operations and maintains file list state for desktop platforms"""
-    
     def __init__(self):
         self.selected_files: List[str] = []
         self._observers: List[Callable] = []
-    
+
     def add_observer(self, callback: Callable):
-        """Add observer for file list changes"""
         self._observers.append(callback)
-    
+
     def remove_observer(self, callback: Callable):
-        """Remove observer"""
         if callback in self._observers:
             self._observers.remove(callback)
-    
+
     def _notify_observers(self):
-        """Notify all observers of file list changes"""
         for callback in self._observers:
             try:
                 callback(self.selected_files.copy())
             except Exception as e:
                 print(f"Observer notification error: {e}")
-    
+
     def add_files(self, file_paths: List[str]) -> FileOperationResponse:
-        """Add files to the selection, with validation"""
         if not file_paths:
-            return FileOperationResponse(
-                FileOperationResult.ERROR,
-                "No files provided"
-            )
-        
-        added_files = []
-        invalid_files = []
-        
-        for file_path in file_paths:
-            if not os.path.exists(file_path):
-                invalid_files.append(f"{os.path.basename(file_path)} (not found)")
-                continue
-            
-            if not file_path.lower().endswith('.pdf'):
-                invalid_files.append(f"{os.path.basename(file_path)} (not a PDF)")
-                continue
-            
-            if not self._is_valid_pdf(file_path):
-                invalid_files.append(f"{os.path.basename(file_path)} (corrupted PDF)")
-                continue
-            
-            if file_path not in self.selected_files:
-                self.selected_files.append(file_path)
-                added_files.append(os.path.basename(file_path))
-        
+            return FileOperationResponse(FileOperationResult.ERROR, "No files provided")
+
+        added, invalid = [], []
+        for path in file_paths:
+            if not os.path.exists(path):
+                invalid.append(f"{os.path.basename(path)} (not found)")
+            elif not path.lower().endswith('.pdf'):
+                invalid.append(f"{os.path.basename(path)} (not a PDF)")
+            elif not self._is_valid_pdf(path):
+                invalid.append(f"{os.path.basename(path)} (corrupted)")
+            elif path not in self.selected_files:
+                self.selected_files.append(path)
+                added.append(os.path.basename(path))
+
         self._notify_observers()
-        
-        if added_files and not invalid_files:
-            return FileOperationResponse(
-                FileOperationResult.SUCCESS,
-                f"Added {len(added_files)} files successfully"
-            )
-        elif added_files and invalid_files:
-            return FileOperationResponse(
-                FileOperationResult.SUCCESS,
-                f"Added {len(added_files)} files. Skipped {len(invalid_files)} invalid files"
-            )
-        else:
-            return FileOperationResponse(
-                FileOperationResult.ERROR,
-                f"No valid files added. Issues: {', '.join(invalid_files)}"
-            )
-    
+        if added and not invalid:
+            return FileOperationResponse(FileOperationResult.SUCCESS, f"Added {len(added)} files")
+        if added and invalid:
+            return FileOperationResponse(FileOperationResult.SUCCESS, 
+                                         f"Added {len(added)} files; skipped {len(invalid)} invalid: {', '.join(invalid)}")
+        return FileOperationResponse(FileOperationResult.ERROR, f"No valid files added: {', '.join(invalid)}")
+
     def remove_file(self, index: int) -> FileOperationResponse:
-        """Remove file at specific index"""
-        if not 0 <= index < len(self.selected_files):
-            return FileOperationResponse(
-                FileOperationResult.ERROR,
-                "Invalid file index"
-            )
-        
-        removed_file = os.path.basename(self.selected_files.pop(index))
+        if not (0 <= index < len(self.selected_files)):
+            return FileOperationResponse(FileOperationResult.ERROR, "Invalid index")
+        removed = os.path.basename(self.selected_files.pop(index))
         self._notify_observers()
-        
-        return FileOperationResponse(
-            FileOperationResult.SUCCESS,
-            f"Removed {removed_file}"
-        )
-    
+        return FileOperationResponse(FileOperationResult.SUCCESS, f"Removed {removed}")
+
     def clear_files(self) -> FileOperationResponse:
-        """Clear all selected files"""
         count = len(self.selected_files)
         self.selected_files.clear()
         self._notify_observers()
-        
-        return FileOperationResponse(
-            FileOperationResult.SUCCESS,
-            f"Cleared {count} files"
-        )
-    
-    def move_file(self, from_index: int, to_index: int) -> FileOperationResponse:
-        """Move file from one position to another"""
-        if not (0 <= from_index < len(self.selected_files) and 
-                0 <= to_index < len(self.selected_files)):
-            return FileOperationResponse(
-                FileOperationResult.ERROR,
-                "Invalid indices"
-            )
-        
-        file_path = self.selected_files.pop(from_index)
-        self.selected_files.insert(to_index, file_path)
+        return FileOperationResponse(FileOperationResult.SUCCESS, f"Cleared {count} files")
+
+    def move_file(self, from_idx: int, to_idx: int) -> FileOperationResponse:
+        if not (0 <= from_idx < len(self.selected_files) and 0 <= to_idx < len(self.selected_files)):
+            return FileOperationResponse(FileOperationResult.ERROR, "Invalid indices")
+        file = self.selected_files.pop(from_idx)
+        self.selected_files.insert(to_idx, file)
         self._notify_observers()
-        
-        return FileOperationResponse(
-            FileOperationResult.SUCCESS,
-            "File reordered successfully"
-        )
-    
+        return FileOperationResponse(FileOperationResult.SUCCESS, "Reordered files")
+
     def get_files(self) -> List[str]:
-        """Get copy of current file list"""
         return self.selected_files.copy()
-    
+
     def get_file_count(self) -> int:
-        """Get number of selected files"""
         return len(self.selected_files)
-    
+
     def merge_pdfs(self, output_path: str) -> FileOperationResponse:
-        """Merge all selected PDFs into one file"""
         if not PDF_LIBRARY_AVAILABLE:
-            return FileOperationResponse(
-                FileOperationResult.ERROR,
-                "PyPDF2 library not available. Install with: pip install PyPDF2"
-            )
-        
+            return FileOperationResponse(FileOperationResult.ERROR, 
+                                         "PyPDF2 not installed. Run: pip install PyPDF2")
         if len(self.selected_files) < 2:
-            return FileOperationResponse(
-                FileOperationResult.ERROR,
-                "Need at least 2 files to merge"
-            )
-        
+            return FileOperationResponse(FileOperationResult.ERROR, "Need at least 2 PDFs to merge")
         try:
             merger = PyPDF2.PdfMerger()
-            
-            for file_path in self.selected_files:
-                if not os.path.exists(file_path):
-                    return FileOperationResponse(
-                        FileOperationResult.ERROR,
-                        f"File not found: {os.path.basename(file_path)}"
-                    )
-                merger.append(file_path)
-            
-            # Ensure output directory exists
-            output_dir = os.path.dirname(output_path)
-            if output_dir and not os.path.exists(output_dir):
-                os.makedirs(output_dir)
-            
-            with open(output_path, 'wb') as output_file:
-                merger.write(output_file)
-            
+            for f in self.selected_files:
+                if not os.path.exists(f):
+                    return FileOperationResponse(FileOperationResult.ERROR, f"Missing: {os.path.basename(f)}")
+                merger.append(f)
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            with open(output_path, 'wb') as out_f:
+                merger.write(out_f)
             merger.close()
-            
-            return FileOperationResponse(
-                FileOperationResult.SUCCESS,
-                f"Successfully merged {len(self.selected_files)} files to {os.path.basename(output_path)}"
-            )
-            
+            return FileOperationResponse(FileOperationResult.SUCCESS, 
+                                         f"Merged {len(self.selected_files)} PDFs to {os.path.basename(output_path)}")
         except Exception as e:
-            return FileOperationResponse(
-                FileOperationResult.ERROR,
-                f"Merge failed: {str(e)}"
-            )
-    
-    def _is_valid_pdf(self, file_path: str) -> bool:
-        if not PDF_LIBRARY_AVAILABLE:
-            # Basic check without library
+            return FileOperationResponse(FileOperationResult.ERROR, f"Merge failed: {e}")
+
+    def _is_valid_pdf(self, path: str) -> bool:
+        if PDF_LIBRARY_AVAILABLE:
             try:
-                with open(file_path, 'rb') as f:
-                    header = f.read(4)
-                    return header == b'%PDF'
+                with open(path, 'rb') as f:
+                    PyPDF2.PdfReader(f)
+                return True
             except:
                 return False
-        
-        try:
-            with open(file_path, 'rb') as f:
-                PyPDF2.PdfReader(f)
-            return True
-        except:
-            return False
+        else:
+            try:
+                with open(path, 'rb') as f:
+                    return f.read(4) == b'%PDF'
+            except:
+                return False
 
+# --- Kivy-based file dialogs ---
 
-# Desktop-specific file picking functions
 def pick_files_desktop(callback: Callable[[List[str]], None]):
-    """Desktop file picker using tkinter"""
-    try:
-        from tkinter import filedialog
-        import tkinter as tk
-        
-        root = tk.Tk()
-        root.withdraw()  # Hide the main window
-        
-        files = filedialog.askopenfilenames(
-            title="Select PDF Files",
-            filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")]
-        )
-        
-        root.destroy()
-        callback(list(files) if files else [])
-        
-    except ImportError:
-        print("tkinter not available for file picker")
-        callback([])
+    """Show a Kivy popup to pick multiple PDF files."""
+    chooser = FileChooserListView(
+        filters=['*.pdf'],
+        multiselect=True,
+        size_hint=(1, 0.8)
+    )
+    btn_layout = BoxLayout(size_hint=(1, 0.2), spacing=dp(10), padding=dp(10))
+    cancel = Button(text="Cancel")
+    select = Button(text="Select")
+    btn_layout.add_widget(cancel)
+    btn_layout.add_widget(select)
+
+    content = BoxLayout(orientation='vertical')
+    content.add_widget(chooser)
+    content.add_widget(btn_layout)
+
+    popup = Popup(title="Select PDF Files", content=content,
+                  size_hint=(0.9, 0.9), auto_dismiss=False)
+
+    cancel.bind(on_release=lambda *a: (popup.dismiss(), callback([])))
+    select.bind(on_release=lambda *a: (popup.dismiss(), callback(chooser.selection)))
+    popup.open()
 
 
-def choose_directory_desktop() -> Optional[str]:
-    """Desktop directory chooser using tkinter"""
-    try:
-        from tkinter import filedialog
-        import tkinter as tk
-        
-        root = tk.Tk()
-        root.withdraw()  # Hide the main window
-        
-        directory = filedialog.askdirectory(title="Select Directory")
-        root.destroy()
-        return directory if directory else None
-        
-    except ImportError:
-        print("tkinter not available for directory picker")
-        return None
+def choose_directory_desktop(callback: Callable[[Optional[str]], None]):
+    """Show a Kivy popup to pick a directory."""
+    chooser = FileChooserListView(
+        dirselect=True,
+        size_hint=(1, 0.8)
+    )
+    btn_layout = BoxLayout(size_hint=(1, 0.2), spacing=dp(10), padding=dp(10))
+    cancel = Button(text="Cancel")
+    select = Button(text="Select")
+    btn_layout.add_widget(cancel)
+    btn_layout.add_widget(select)
+
+    content = BoxLayout(orientation='vertical')
+    content.add_widget(chooser)
+    content.add_widget(btn_layout)
+
+    popup = Popup(title="Select Directory", content=content,
+                  size_hint=(0.9, 0.9), auto_dismiss=False)
+
+    cancel.bind(on_release=lambda *a: (popup.dismiss(), callback(None)))
+    select.bind(on_release=lambda *a: (popup.dismiss(), callback(chooser.path)))
+    popup.open()
 
 
-def save_file_dialog_desktop(default_filename: str = "merged_document.pdf") -> Optional[str]:
-    """
-    Desktop save dialog using tkinter
-    Returns the full path where user wants to save the file, or None if cancelled
-    """
-    try:
-        from tkinter import filedialog
-        import tkinter as tk
-        
-        root = tk.Tk()
-        root.withdraw()  # Hide the main window
-        
-        # Show save dialog with default filename
-        file_path = filedialog.asksaveasfilename(
-            title="Save Merged PDF As...",
-            defaultextension=".pdf",
-            filetypes=[
-                ("PDF files", "*.pdf"),
-                ("All files", "*.*")
-            ],
-            initialvalue=default_filename
-        )
-        
-        root.destroy()
-        return file_path if file_path else None
-        
-    except ImportError:
-        print("tkinter not available for save dialog")
-        return None
-    except Exception as e:
-        print(f"Desktop save dialog error: {e}")
-        return None
+def save_file_dialog_desktop(default_filename: str, callback: Callable[[Optional[str]], None]):
+    """Show a Kivy popup to choose save location and filename."""
+    chooser = FileChooserListView(
+        dirselect=True,
+        size_hint=(1, 0.7)
+    )
+    filename_input = TextInput(
+        text=default_filename,
+        size_hint=(1, None),
+        height=dp(40),
+        multiline=False
+    )
+    btn_layout = BoxLayout(size_hint=(1, 0.2), spacing=dp(10), padding=dp(10))
+    cancel = Button(text="Cancel")
+    save = Button(text="Save")
+    btn_layout.add_widget(cancel)
+    btn_layout.add_widget(save)
 
+    content = BoxLayout(orientation='vertical')
+    content.add_widget(chooser)
+    content.add_widget(filename_input)
+    content.add_widget(btn_layout)
+
+    popup = Popup(title="Save Merged PDF As...", content=content,
+                  size_hint=(0.9, 0.9), auto_dismiss=False)
+
+    cancel.bind(on_release=lambda *a: (popup.dismiss(), callback(None)))
+    def _do_save(*args):
+        fname = filename_input.text.strip()
+        if not fname:
+            StatusPopup.show("Error", "Enter a filename", is_error=True)
+            return
+        if not fname.lower().endswith('.pdf'):
+            fname += '.pdf'
+        path = os.path.join(chooser.path, fname)
+        popup.dismiss()
+        callback(path)
+    save.bind(on_release=_do_save)
+
+    popup.open()
+
+# Other utility functions
 
 def get_desktop_default_output_path() -> str:
-    """Get default output path for merged PDF on desktop"""
     desktop = os.path.join(os.path.expanduser("~"), "Desktop")
-    if os.path.exists(desktop):
-        return os.path.join(desktop, "merged_document.pdf")
-    else:
-        return os.path.join(os.path.expanduser("~"), "merged_document.pdf")
-
-
-def get_desktop_safe_path() -> str:
-    """Get a desktop-appropriate safe path for file operations"""
-    desktop_paths = [
-        os.path.join(os.path.expanduser("~"), "Desktop"),
-        os.path.join(os.path.expanduser("~"), "Documents"),
-        os.path.expanduser("~"),
-        os.getcwd()
-    ]
-    
-    for path in desktop_paths:
-        if os.path.exists(path) and os.access(path, os.W_OK):
-            return path
-    
-    # Ultimate fallback
-    return os.getcwd()
+    return os.path.join(desktop if os.path.exists(desktop) else os.path.expanduser("~"), "merged_document.pdf")
 
 
 def validate_desktop_output_path(output_path: str) -> tuple[bool, str]:
-    """
-    Validate if the output path is writable on desktop platforms
-    Returns (is_valid, error_message)
-    """
     try:
-        # Check if path exists
-        if not os.path.exists(output_path):
-            # Try to create the directory
-            try:
-                os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            except Exception as e:
-                return False, f"Cannot create directory: {e}"
-        
-        # Check if we can write to the location
-        directory = os.path.dirname(output_path)
-        if not os.access(directory, os.W_OK):
-            return False, f"No write permission for directory: {directory}"
-        
-        # Check if file already exists and is writable
-        if os.path.exists(output_path):
-            if not os.access(output_path, os.W_OK):
-                return False, f"File exists but is not writable: {output_path}"
-        
+        dir_ = os.path.dirname(output_path)
+        os.makedirs(dir_, exist_ok=True)
+        if not os.access(dir_, os.W_OK):
+            return False, f"No write permission: {dir_}"
+        if os.path.exists(output_path) and not os.access(output_path, os.W_OK):
+            return False, f"File not writable: {output_path}"
         return True, "Path is valid"
-    
     except Exception as e:
-        return False, f"Path validation error: {e}"
+        return False, f"Validation error: {e}"
 
 
 def format_file_size(file_path: str) -> str:
-    """Format file size in human readable format"""
     try:
         size = os.path.getsize(file_path)
-        for unit in ['B', 'KB', 'MB', 'GB']:
+        for unit in ['B','KB','MB','GB']:
             if size < 1024:
                 return f"{size:.1f} {unit}"
             size /= 1024
-        return "Massive file size"
+        return f"{size:.1f} TB"
     except:
         return "Unknown size"
 
 
 def create_backup_filename(original_path: str) -> str:
-    """
-    Create a backup filename if the original already exists
-    Returns a new filename with timestamp or counter
-    """
     if not os.path.exists(original_path):
         return original_path
-    
-    directory = os.path.dirname(original_path)
-    filename = os.path.basename(original_path)
-    name, ext = os.path.splitext(filename)
-    
-    # Try with timestamp first
-    from datetime import datetime
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(directory, f"{name}_{timestamp}{ext}")
-    
-    if not os.path.exists(backup_path):
-        return backup_path
-    
-    # If timestamp version exists, use counter
-    counter = 1
-    while True:
-        backup_path = os.path.join(directory, f"{name}_{counter:03d}{ext}")
-        if not os.path.exists(backup_path):
-            return backup_path
-        counter += 1
-        if counter > 999:  # Safety limit
-            break
-
-
-    return original_path  # Fallback to original
+    base, ext = os.path.splitext(os.path.basename(original_path))
+    dir_ = os.path.dirname(original_path)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup = os.path.join(dir_, f"{base}_{ts}{ext}")
+    if not os.path.exists(backup):
+        return backup
+    cnt = 1
+    while cnt < 1000:
+        alt = os.path.join(dir_, f"{base}_{cnt:03d}{ext}")
+        if not os.path.exists(alt):
+            return alt
+        cnt += 1
+    return original_path
