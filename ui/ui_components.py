@@ -75,14 +75,24 @@ class FileItemWidget(RoundedBoxLayout):
         file_info.add_widget(file_name)
         file_info.add_widget(file_size)
         # X BUTTON
-        remove_btn = Button(
+        remove_button = Button(
             text="X",
             size_hint=(None, 1),
             width=dp(40),
             background_color=(0.8, 0.2, 0.2, 1),
             color=Theme.TEXT_PRIMARY
         )
-        remove_btn.bind(on_release=lambda x: on_remove_callback(index))
+        remove_button.bind(on_release=lambda x: on_remove_callback(index))
+        # VIEW BUTTON
+        view_button = Button(
+            text="View",
+            size_hint=(None, 1),
+            width=dp(40),
+            background_color=(0.1, 0.1, 0.4),
+            color=Theme.TEXT_PRIMARY
+        )
+        
         
         self.add_widget(file_info)
-        self.add_widget(remove_btn)
+        self.add_widget(remove_button)
+        self.add_widget(view_button)

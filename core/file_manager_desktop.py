@@ -1,7 +1,7 @@
 """
 Desktop File Management Module for PDF operations
 Handles file selection, validation, and PDF operations for desktop platforms (Windows, macOS, Linux)
-Now uses Kivy popups for file dialogs instead of tkinter.
+Using Kivy popups for file dialogs instead of tkinter.
 """
 
 import os
@@ -27,7 +27,7 @@ from kivy.uix.filechooser import FileChooserListView
 from kivy.metrics import dp
 from kivy.clock import Clock
 
-# Result types for file operations
+# FILE OPERATION RESULTS CLASS
 class FileOperationResult(Enum):
     SUCCESS = "success"
     ERROR = "error"
@@ -146,10 +146,9 @@ class DesktopPDFFileManager:
             except:
                 return False
 
-# --- Kivy-based file dialogs ---
+# FILE PICKER FUNCTIONS
 
 def pick_files_desktop(callback: Callable[[List[str]], None]):
-    """Show a Kivy popup to pick multiple PDF files."""
     chooser = FileChooserListView(
         filters=['*.pdf'],
         multiselect=True,
@@ -174,7 +173,6 @@ def pick_files_desktop(callback: Callable[[List[str]], None]):
 
 
 def choose_directory_desktop(callback: Callable[[Optional[str]], None]):
-    """Show a Kivy popup to pick a directory."""
     chooser = FileChooserListView(
         dirselect=True,
         size_hint=(1, 0.8)
@@ -198,7 +196,6 @@ def choose_directory_desktop(callback: Callable[[Optional[str]], None]):
 
 
 def save_file_dialog_desktop(default_filename: str, callback: Callable[[Optional[str]], None]):
-    """Show a Kivy popup to choose save location and filename."""
     chooser = FileChooserListView(
         dirselect=True,
         size_hint=(1, 0.7)
@@ -238,7 +235,7 @@ def save_file_dialog_desktop(default_filename: str, callback: Callable[[Optional
 
     popup.open()
 
-# Other utility functions
+# OTHER UTILITY FUNCTIONS
 
 def get_desktop_default_output_path() -> str:
     desktop = os.path.join(os.path.expanduser("~"), "Desktop")
