@@ -1,3 +1,6 @@
+"""This file contains the UI components used in the application.
+It includes custom widgets like RoundedBoxLayout, StyledButton, and FileItemWidget."""
+
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.graphics import Color, RoundedRectangle
@@ -38,7 +41,7 @@ class StyledButton(Button):
         self.rect.size = self.size
 
 class FileItemWidget(RoundedBoxLayout):
-    def __init__(self, file_path, index, on_remove_callback, **kwargs):
+    def __init__(self, file_path, index, on_remove_callback, on_view_callback, **kwargs):
         super().__init__(
             orientation='horizontal',
             bg_color=Theme.ITEM_BG,
@@ -91,7 +94,7 @@ class FileItemWidget(RoundedBoxLayout):
             background_color=(0.1, 0.1, 0.4),
             color=Theme.TEXT_PRIMARY
         )
-        
+        view_button.bind(on_release=lambda x: on_view_callback(file_path))
         
         self.add_widget(file_info)
         self.add_widget(remove_button)

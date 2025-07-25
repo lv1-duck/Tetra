@@ -163,13 +163,26 @@ class MainScreen(Screen):
             empty_label.bind(size=empty_label.setter('text_size'))
             self.file_list_layout.add_widget(empty_label)
             return
+        
         for index, file_path in enumerate(self.file_manager.get_files()):
             file_item = FileItemWidget(
                 file_path=file_path,
                 index=index,
-                on_remove_callback=self.remove_file
+                on_remove_callback=self.remove_file,
+                on_view_callback=self.view_file  
             )
             self.file_list_layout.add_widget(file_item)
+
+    def view_file(self, file_path):
+        try:
+            sm = self.manager
+            
+            app = App.get_running_app()
+            app.viewer_widget.load_pdf(file_path)
+            sm.current = 'viewer'
+            
+        except Exception as e:
+            StatusPopup.show("Error", f"Could not open PDF viewer: {str(e)}", is_error=True)
 
     def remove_file(self, index):
         response = self.file_manager.remove_file(index)
@@ -258,33 +271,35 @@ class MainScreen(Screen):
 
     def perform_save_dialog(self, filename):
         try:
-            output_path = save_file_dialog_desktop(filename)
-            self.dismiss_loading_popup()
+            def save_callback(output_path):
+                self.dismiss_loading_popup()
+                if output_path:
+                    # VALIDATE THE PATH
+                    is_valid, message = validate_desktop_output_path(output_path)
+                    if not is_valid:
+                        StatusPopup.show("Error", f"Invalid save location: {message}", is_error=True)
+                        return
+                    
+                    # CHECK IF FILE EXISTS, CREATE BACKUP IF NEEDED
+                    if os.path.exists(output_path):
+                        backup_path = create_backup_filename(output_path)
+                        if backup_path != output_path:
+                            StatusPopup.show("Info", f"File exists, saving as {os.path.basename(backup_path)}")
+                            output_path = backup_path
+                    
+                    # USER SELECTED A LOCATION, PROCEED WITH MERGE
+                    self.perform_merge_with_path(output_path)
+                else:
+                    # USER CANCELLED THE SAVE DIALOG
+                    StatusPopup.show("Info", "Save cancelled by user")
             
-            if output_path:
-                # VALIDATE THE PATH
-                is_valid, message = validate_desktop_output_path(output_path)
-                if not is_valid:
-                    StatusPopup.show("Error", f"Invalid save location: {message}", is_error=True)
-                    return
-                
-                # CHECK IF FILE EXISTS, CREATE BACKUP IF NEEDED
-                if os.path.exists(output_path):
-                    backup_path = create_backup_filename(output_path)
-                    if backup_path != output_path:
-                        StatusPopup.show("Info", f"File exists, saving as {os.path.basename(backup_path)}")
-                        output_path = backup_path
-                
-                # USER SELECTED A LOCATION, PROCEED WITH MERGE
-                self.perform_merge_with_path(output_path)
-            else:
-                # USER CANCELLED THE SAVE DIALOG
-                StatusPopup.show("Info", "Save cancelled by user")
-        
+            # Call the function with both required arguments
+            save_file_dialog_desktop(filename, save_callback)
+            
         except Exception as e:
             self.dismiss_loading_popup()
             StatusPopup.show("Error", f"Error showing save dialog: {str(e)}", is_error=True)
-    
+            
     def perform_merge_with_path(self, output_path):
         # SHOW PROGRESS POPUP
         self.show_loading_popup(f"Merging {self.file_manager.get_file_count()} PDFs...")
@@ -383,6 +398,7 @@ class MainScreen(Screen):
                 subprocess.run(["xdg-open", os.path.dirname(file_path)])
         except Exception as e:
             StatusPopup.show("Error", f"Could not open file location: {str(e)}", is_error=True)
+            
     # HELPER METHODS FOR LOADING POPUPS
     def show_loading_popup(self, message="Please wait..."):
         if hasattr(self, '_loading_popup') and self._loading_popup:
@@ -400,9 +416,9 @@ class MainScreen(Screen):
             halign='center'
         )
         content.add_widget(loading_label)
-        # SIMPLE LOADING INDICATOR USING UNICODE
+        # SIMPLE LOADING INDICATOR
         spinner_label = Label(
-            text="⟳", 
+            text=".", 
             color=Theme.BUTTON_BG,
             font_size=dp(30)
         )
@@ -428,7 +444,7 @@ class MainScreen(Screen):
                 self._spinner_event = None
 
     def _start_spinner_animation(self, spinner_label):
-        spinner_chars = ["⟳", "⟲", "⟳", "⟲"]
+        spinner_chars = [".", "..", "...", "...."] #I WILL SOMEDAY MAKE A REAL AND BETTER SPINNER ANIMATION
         self._spinner_index = 0
         
         def update_spinner(dt):
@@ -437,7 +453,7 @@ class MainScreen(Screen):
                 spinner_label.text = spinner_chars[self._spinner_index]
                 return True
             else:
-                return False  #STOP
+                return False
         self._spinner_event = Clock.schedule_interval(update_spinner, 0.3)
     
 
@@ -447,7 +463,15 @@ class PDFApp(App):
         self.title = "PDF Utility Tool - Desktop"
         sm = ScreenManager()
         sm.add_widget(MainScreen(name='main'))
-        return sm  
+        
+        #VIEWER SCREEN
+        from ui.viewer_screen import ViewerScreen  # Import your ViewerScreen
+        viewer_screen = Screen(name='viewer')
+        self.viewer_widget = ViewerScreen()
+        viewer_screen.add_widget(self.viewer_widget)
+        sm.add_widget(viewer_screen)
+        
+        return sm
 
 if __name__ == "__main__":
     PDFApp().run()

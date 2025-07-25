@@ -1,3 +1,5 @@
+"""Viewer screen class file"""
+
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
@@ -37,9 +39,12 @@ class ViewerScreen(BoxLayout):
             self.show_error("PDF libraries not available. Install: pip install pdf2image PyPDF2")
     
     def setup_ui(self):
-        """Create the viewer interface"""
-        # Top navigation bar
+        # TOP NAVIGATION BAR
         nav_layout = BoxLayout(orientation='horizontal', size_hint_y=0.1)
+
+         # Add back button
+        back_btn = Button(text='← Back', size_hint_x=0.2)
+        back_btn.bind(on_press=lambda x: self.go_back())
         
         self.prev_btn = Button(text='◀ Previous', size_hint_x=0.3)
         self.prev_btn.bind(on_press=lambda x: self.show_previous())
@@ -48,12 +53,13 @@ class ViewerScreen(BoxLayout):
         
         self.next_btn = Button(text='Next ▶', size_hint_x=0.3)
         self.next_btn.bind(on_press=lambda x: self.show_next())
-        
+
+        nav_layout.add_widget(back_btn)
         nav_layout.add_widget(self.prev_btn)
         nav_layout.add_widget(self.page_label)
         nav_layout.add_widget(self.next_btn)
         
-        # PDF display area
+        # PDF DISPLAY AREA
         self.pdf_image = KivyImage(size_hint_y=0.9)
         
         # Add to main layout
@@ -62,7 +68,13 @@ class ViewerScreen(BoxLayout):
         
         # Initially disable navigation
         self.update_navigation_state()
-    
+
+    def go_back(self):
+        """Return to main screen"""
+        from kivy.app import App
+        app = App.get_running_app()
+        app.root.current = 'main'
+        
     def load_pdf(self, path):
         """Load PDF and render first page"""
         if not PDF_LIBRARIES_AVAILABLE:
