@@ -1,11 +1,15 @@
-"""Viewer screen class file"""
+"""Desktop viewer screen class file"""
 
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.image import Image as KivyImage
 from kivy.core.image import Image as CoreImage
+from kivy.uix.scatter import Scatter
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.widget import Widget
 from kivy.clock import Clock
+from kivy.core.window import Window
 from PIL import Image
 import io
 import os
@@ -18,6 +22,84 @@ except ImportError:
     PDF_LIBRARIES_AVAILABLE = False
 
 
+class ZoomableScrollableImage(ScrollView):
+    """Desktop zoomable and scrollable image widget"""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.do_scroll_x = True
+        self.do_scroll_y = True
+        self.bar_width = 10
+        self.scroll_type = ['bars']
+        
+        # Create scatter for zooming
+        self.scatter = Scatter(
+            do_rotation=False,
+            scale_min=0.5,
+            scale_max=5.0,
+            size_hint=(None, None)
+        )
+        
+        # Create image
+        self.image = KivyImage(
+            allow_stretch=True,
+            keep_ratio=True,
+            size_hint=(None, None)
+        )
+        
+        self.scatter.add_widget(self.image)
+        self.add_widget(self.scatter)
+        
+        # Bind events
+        self.scatter.bind(scale=self.on_scale_change)
+        self.image.bind(texture=self.on_texture_change)
+        
+    def on_texture_change(self, instance, texture):
+        """Update image size when texture changes"""
+        if texture:
+            # Set image size to texture size
+            self.image.size = texture.size
+            # Update scatter size to match image
+            self.scatter.size = texture.size
+            # Center the image
+            self.center_image()
+    
+    def on_scale_change(self, instance, scale):
+        """Update scroll view when scale changes"""
+        if self.image.texture:
+            # Update scatter size based on scale
+            texture_size = self.image.texture.size
+            self.scatter.size = (texture_size[0] * scale, texture_size[1] * scale)
+    
+    def center_image(self):
+        """Center the image in the scroll view"""
+        if self.image.texture:
+            # Reset scatter position and scale
+            self.scatter.scale = 1.0
+            self.scatter.pos = (0, 0)
+            # Center scroll position
+            Clock.schedule_once(self._center_scroll, 0.1)
+    
+    def _center_scroll(self, dt):
+        """Center the scroll position"""
+        self.scroll_x = 0.5
+        self.scroll_y = 0.5
+    
+    def zoom_in(self):
+        """Zoom in by 25%"""
+        new_scale = min(self.scatter.scale * 1.25, self.scatter.scale_max)
+        self.scatter.scale = new_scale
+    
+    def zoom_out(self):
+        """Zoom out by 25%"""
+        new_scale = max(self.scatter.scale * 0.8, self.scatter.scale_min)
+        self.scatter.scale = new_scale
+    
+    def fit_to_screen(self):
+        """Fit image to screen"""
+        self.scatter.scale = 1.0
+        self.center_image()
+
+
 class ViewerScreen(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -25,50 +107,72 @@ class ViewerScreen(BoxLayout):
         
         # Initialize PDF state
         self.current_pdf_path = None
-        self.pdf_document = None  # PyMuPDF document object
+        self.pdf_document = None
         self.current_page = 1
         self.total_pages = 0
-        self.page_cache = {}  # Simple cache for rendered pages
-        self.max_cache_size = 3  # Keep only 3 pages in memory for mobile
+        self.page_cache = {}
         
-        # Rendering settings for PyMuPDF
-        self.zoom_factor = 1.5  # Good balance for mobile (1.0 = 72 DPI, 1.5 = 108 DPI)
-        self.max_width = 800  # Maximum width for mobile optimization
+        # Desktop-optimized settings
+        self.max_cache_size = 5  # More memory available on desktop
+        self.zoom_factor = 2.0   # Higher quality for desktop displays
+        self.max_width = None    # Don't limit width - let it scale to fit screen
+        self.target_dpi = 150    # Target DPI for good quality
         
         # Create UI elements
         self.setup_ui()
+        
+        # Bind keyboard events for desktop
+        Window.bind(on_key_down=self.on_key_down)
+        Window.bind(on_dropfile=self.on_file_drop)
         
         # Check if libraries are available
         if not PDF_LIBRARIES_AVAILABLE:
             self.show_error("PDF libraries not available. Install: pip install PyMuPDF")
     
     def setup_ui(self):
-        # TOP NAVIGATION BAR
-        nav_layout = BoxLayout(orientation='horizontal', size_hint_y=0.1)
+        # DESKTOP NAVIGATION BAR with zoom controls
+        nav_layout = BoxLayout(orientation='horizontal', size_hint_y=0.08)
 
-         # Add back button
-        back_btn = Button(text='← Back', size_hint_x=0.2)
+        # Navigation buttons
+        back_btn = Button(text='← Back', size_hint_x=0.15, font_size='14sp')
         back_btn.bind(on_press=lambda x: self.go_back())
         
-        self.prev_btn = Button(text='◀ Previous', size_hint_x=0.3)
+        self.prev_btn = Button(text='◀ Previous', size_hint_x=0.15, font_size='14sp')
         self.prev_btn.bind(on_press=lambda x: self.show_previous())
         
-        self.page_label = Label(text='No PDF loaded', size_hint_x=0.4)
+        self.page_label = Label(text='No PDF loaded', size_hint_x=0.2, font_size='14sp')
         
-        self.next_btn = Button(text='Next ▶', size_hint_x=0.3)
+        self.next_btn = Button(text='Next ▶', size_hint_x=0.15, font_size='14sp')
         self.next_btn.bind(on_press=lambda x: self.show_next())
+        
+        # Zoom controls
+        zoom_out_btn = Button(text='−', size_hint_x=0.08, font_size='16sp')
+        zoom_out_btn.bind(on_press=lambda x: self.zoom_out())
+        
+        fit_btn = Button(text='Fit', size_hint_x=0.09, font_size='12sp')
+        fit_btn.bind(on_press=lambda x: self.fit_to_screen())
+        
+        zoom_in_btn = Button(text='+', size_hint_x=0.08, font_size='16sp')
+        zoom_in_btn.bind(on_press=lambda x: self.zoom_in())
+        
+        self.zoom_label = Label(text='100%', size_hint_x=0.1, font_size='12sp')
 
         nav_layout.add_widget(back_btn)
         nav_layout.add_widget(self.prev_btn)
         nav_layout.add_widget(self.page_label)
         nav_layout.add_widget(self.next_btn)
+        nav_layout.add_widget(zoom_out_btn)
+        nav_layout.add_widget(fit_btn)
+        nav_layout.add_widget(zoom_in_btn)
+        nav_layout.add_widget(self.zoom_label)
         
-        # PDF DISPLAY AREA
-        self.pdf_image = KivyImage(size_hint_y=0.9)
+        # ZOOMABLE PDF DISPLAY AREA
+        self.pdf_viewer = ZoomableScrollableImage(size_hint_y=0.92)
+        self.pdf_viewer.scatter.bind(scale=self.on_zoom_change)
         
         # Add to main layout
         self.add_widget(nav_layout)
-        self.add_widget(self.pdf_image)
+        self.add_widget(self.pdf_viewer)
         
         # Initially disable navigation
         self.update_navigation_state()
@@ -108,7 +212,7 @@ class ViewerScreen(BoxLayout):
             self.current_pdf_path = path
             self.total_pages = total_pages
             self.current_page = 1
-            self.page_cache.clear()  # Clear any existing cache
+            self.page_cache.clear()
             
             # Update UI
             self.update_page_label()
@@ -116,6 +220,9 @@ class ViewerScreen(BoxLayout):
             
             # Render first page in background thread
             self.render_page_async(1)
+            
+            # Preload adjacent pages for smooth navigation
+            Clock.schedule_once(lambda dt: self.preload_adjacent_pages(), 1.0)
             
         except Exception as e:
             self.show_error(f"Failed to load PDF: {str(e)[:50]}")
@@ -127,6 +234,8 @@ class ViewerScreen(BoxLayout):
             self.update_page_label()
             self.update_navigation_state()
             self.render_page_async(self.current_page)
+            # Preload next pages
+            Clock.schedule_once(lambda dt: self.preload_adjacent_pages(), 0.5)
     
     def show_previous(self):
         """Navigate to previous page"""
@@ -135,6 +244,8 @@ class ViewerScreen(BoxLayout):
             self.update_page_label()
             self.update_navigation_state()
             self.render_page_async(self.current_page)
+            # Preload adjacent pages
+            Clock.schedule_once(lambda dt: self.preload_adjacent_pages(), 0.5)
     
     def render_page_async(self, page_number):
         """Render page in background thread to avoid UI blocking"""
@@ -161,23 +272,22 @@ class ViewerScreen(BoxLayout):
             # Get the page (PyMuPDF uses 0-based indexing)
             page = self.pdf_document[page_number - 1]
             
-            # Create transformation matrix for rendering
+            # Calculate optimal zoom to fit screen width
+            page_rect = page.rect
+            # Use screen-adaptive zoom instead of fixed zoom
             mat = fitz.Matrix(self.zoom_factor, self.zoom_factor)
             
-            # Render page to pixmap
-            pix = page.get_pixmap(matrix=mat)
+            # Render page to pixmap with high quality
+            pix = page.get_pixmap(matrix=mat, alpha=False)
             
             # Convert pixmap to PIL Image
             img_data = pix.tobytes("png")
             pil_image = Image.open(io.BytesIO(img_data))
             
-            # Optimize for mobile display - resize if too large
-            if pil_image.width > self.max_width:
-                ratio = self.max_width / pil_image.width
-                new_height = int(pil_image.height * ratio)
-                pil_image = pil_image.resize((self.max_width, new_height), Image.Resampling.LANCZOS)
+            # For desktop, we want to maintain aspect ratio and fit to available space
+            # The KivyImage with keep_ratio=True will handle the final scaling
             
-            # Convert to bytes for Kivy
+            # Convert to PNG for best quality on desktop
             img_bytes = io.BytesIO()
             pil_image.save(img_bytes, format='PNG', optimize=True)
             img_bytes.seek(0)
@@ -199,7 +309,7 @@ class ViewerScreen(BoxLayout):
         try:
             # Create Kivy image from bytes
             core_image = CoreImage(io.BytesIO(image_data), ext='png')
-            self.pdf_image.texture = core_image.texture
+            self.pdf_viewer.image.texture = core_image.texture
         except Exception as e:
             self.show_error(f"Display error: {str(e)[:30]}")
     
@@ -208,21 +318,80 @@ class ViewerScreen(BoxLayout):
         if page_number in self.page_cache:
             self.display_page_image(self.page_cache[page_number])
     
+    # Zoom control methods
+    def zoom_in(self):
+        """Zoom in"""
+        self.pdf_viewer.zoom_in()
+    
+    def zoom_out(self):
+        """Zoom out"""
+        self.pdf_viewer.zoom_out()
+    
+    def fit_to_screen(self):
+        """Fit to screen"""
+        self.pdf_viewer.fit_to_screen()
+    
+    def on_zoom_change(self, instance, scale):
+        """Update zoom label when scale changes"""
+        zoom_percent = int(scale * 100)
+        self.zoom_label.text = f'{zoom_percent}%'
+    
+    def on_key_down(self, window, key, scancode, codepoint, modifier):
+        """Handle keyboard shortcuts"""
+        if not self.pdf_document:
+            return False
+            
+        # Page navigation with arrow keys
+        if key == 276:  # Left arrow
+            self.show_previous()
+            return True
+        elif key == 275:  # Right arrow
+            self.show_next()
+            return True
+        # Zoom with +/- keys
+        elif key == 61 or key == 270:  # + or numpad +
+            self.zoom_in()
+            return True
+        elif key == 45 or key == 269:  # - or numpad -
+            self.zoom_out()
+            return True
+        # Fit to screen with F key
+        elif key == 102:  # F key
+            self.fit_to_screen()
+            return True
+        # Home/End for first/last page
+        elif key == 278:  # Home
+            self.jump_to_page(1)
+            return True
+        elif key == 279:  # End
+            self.jump_to_page(self.total_pages)
+            return True
+        
+        return False
+    
+    def on_file_drop(self, window, file_path):
+        """Handle drag and drop files"""
+        if file_path.decode('utf-8').lower().endswith('.pdf'):
+            self.load_pdf(file_path.decode('utf-8'))
+            return True
+        return False
+    
     def add_to_cache(self, page_number, image_data):
-        """Add page to cache with size limit"""
-        # Remove oldest if cache is full
+        """Add page to cache with desktop-appropriate size limit"""
+        # Desktop has more memory, so more generous cache management
         if len(self.page_cache) >= self.max_cache_size:
-            # Remove the page furthest from current page
+            # Remove pages furthest from current page
             pages_to_remove = []
             for cached_page in self.page_cache.keys():
-                if abs(cached_page - self.current_page) > 1:
+                if abs(cached_page - self.current_page) > 2:  # Keep 2 pages around current
                     pages_to_remove.append(cached_page)
             
-            # Remove at least one page
+            # Remove the furthest page
             if pages_to_remove:
-                self.page_cache.pop(pages_to_remove[0])
+                furthest_page = max(pages_to_remove, key=lambda p: abs(p - self.current_page))
+                self.page_cache.pop(furthest_page)
             elif self.page_cache:
-                # Remove any page if none are far
+                # Remove oldest entry if all are close
                 self.page_cache.pop(next(iter(self.page_cache)))
         
         self.page_cache[page_number] = image_data
@@ -235,7 +404,7 @@ class ViewerScreen(BoxLayout):
         """Display error message"""
         self.page_label.text = f"Error: {message}"
         # Clear the image
-        self.pdf_image.texture = None
+        self.pdf_viewer.image.texture = None
     
     def update_page_label(self):
         """Update page counter display"""
@@ -260,6 +429,7 @@ class ViewerScreen(BoxLayout):
             self.update_page_label()
             self.update_navigation_state()
             self.render_page_async(page_number)
+            Clock.schedule_once(lambda dt: self.preload_adjacent_pages(), 0.5)
     
     def preload_adjacent_pages(self):
         """Preload next/previous pages for smoother navigation"""

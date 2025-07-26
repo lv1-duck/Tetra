@@ -8,6 +8,7 @@ from kivy.core.image import Image as CoreImage
 from kivy.clock import Clock
 from kivy.uix.scatter import Scatter
 from kivy.uix.widget import Widget
+from kivy.vector import Vector
 from PIL import Image
 import io
 import os
@@ -22,31 +23,51 @@ except ImportError:
 
 
 class ZoomableImage(Scatter):
-    """Touch-enabled zoomable image widget for mobile"""
+    """Enhanced touch-enabled zoomable image widget for mobile"""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.do_rotation = False  # Disable rotation
         self.scale_min = 0.5
-        self.scale_max = 3.0
+        self.scale_max = 5.0  # Allow more zoom
         
-        self.image = KivyImage()
+        self.image = KivyImage(
+            allow_stretch=True,
+            keep_ratio=True
+        )
         self.add_widget(self.image)
+        
+        # Track double tap for fit-to-screen
+        self.last_touch_time = 0
+        self.double_tap_threshold = 0.3
     
     def on_touch_down(self, touch):
-        # Store initial touch for swipe detection
+        # Store initial touch for swipe detection and double tap
         if self.collide_point(*touch.pos):
             self.initial_touch = touch.pos
+            
+            # Check for double tap
+            current_time = touch.time_start
+            if current_time - self.last_touch_time < self.double_tap_threshold:
+                # Double tap - fit to screen or zoom to 2x
+                if self.scale <= 1.1:
+                    self.scale = 2.0  # Zoom in
+                else:
+                    self.scale = 1.0  # Fit to screen
+                    self.pos = (0, 0)
+                return True
+            self.last_touch_time = current_time
+            
             return super().on_touch_down(touch)
         return False
     
     def on_touch_up(self, touch):
         if hasattr(self, 'initial_touch') and self.collide_point(*touch.pos):
-            # Detect swipe gestures
+            # Detect swipe gestures (only when not zoomed)
             dx = touch.pos[0] - self.initial_touch[0]
             dy = touch.pos[1] - self.initial_touch[1]
             
-            # Horizontal swipe for page navigation (if not zoomed)
-            if abs(dx) > 100 and abs(dy) < 50 and self.scale <= 1.1:
+            # Horizontal swipe for page navigation (if not zoomed much)
+            if abs(dx) > 100 and abs(dy) < 50 and self.scale <= 1.2:
                 if dx > 0:  # Right swipe - previous page
                     self.parent.parent.show_previous()
                 else:  # Left swipe - next page  
@@ -54,10 +75,18 @@ class ZoomableImage(Scatter):
                 return True
         
         return super().on_touch_up(touch)
+    
+    def fit_to_screen(self):
+        """Reset zoom and center"""
+        self.scale = 1.0
+        self.pos = (0, 0)
 
 
 class ViewerScreen(BoxLayout):
-    def __init__(self, **kwargs):
+    def __init__(self, mobile_mode=True, **kwargs):
+        # Remove mobile_mode from kwargs before passing to parent
+        if 'mobile_mode' in kwargs:
+            kwargs.pop('mobile_mode')
         super().__init__(**kwargs)
         self.orientation = 'vertical'
         
@@ -70,9 +99,10 @@ class ViewerScreen(BoxLayout):
         
         # Mobile-optimized settings
         self.max_cache_size = 2  # Aggressive memory management for mobile
-        self.zoom_factor = 1.2   # Lower for better performance
-        self.max_width = 600     # Smaller for mobile screens
+        self.zoom_factor = 1.5   # Balanced quality and performance
+        self.max_width = None    # Let it scale to fit screen
         self.render_quality = 0.8  # Reduce quality for speed
+        self.target_dpi = 120    # Lower DPI for mobile performance
         
         # Create UI elements
         self.setup_ui()
@@ -82,29 +112,48 @@ class ViewerScreen(BoxLayout):
             self.show_error("PDF libraries not available. Install: pip install PyMuPDF")
     
     def setup_ui(self):
-        # MOBILE-OPTIMIZED NAVIGATION BAR (larger touch targets)
+        # MOBILE-OPTIMIZED NAVIGATION BAR with zoom controls
         nav_layout = BoxLayout(orientation='horizontal', size_hint_y=0.12, spacing='5dp')
 
-        # Larger buttons for touch
-        back_btn = Button(text='← Back', size_hint_x=0.25, font_size='16sp')
+        # Navigation buttons
+        back_btn = Button(text='← Back', size_hint_x=0.2, font_size='16sp')
         back_btn.bind(on_press=lambda x: self.go_back())
         
-        self.prev_btn = Button(text='◀', size_hint_x=0.2, font_size='18sp')
+        self.prev_btn = Button(text='◀', size_hint_x=0.15, font_size='18sp')
         self.prev_btn.bind(on_press=lambda x: self.show_previous())
         
-        self.page_label = Label(text='No PDF loaded', size_hint_x=0.3, font_size='14sp')
+        self.page_label = Label(text='No PDF loaded', size_hint_x=0.25, font_size='14sp')
         
-        self.next_btn = Button(text='▶', size_hint_x=0.2, font_size='18sp')
+        self.next_btn = Button(text='▶', size_hint_x=0.15, font_size='18sp')
         self.next_btn.bind(on_press=lambda x: self.show_next())
+        
+        # Zoom controls for mobile
+        zoom_out_btn = Button(text='−', size_hint_x=0.1, font_size='18sp')
+        zoom_out_btn.bind(on_press=lambda x: self.zoom_out())
+        
+        fit_btn = Button(text='⌂', size_hint_x=0.1, font_size='16sp')  # Home icon for fit
+        fit_btn.bind(on_press=lambda x: self.fit_to_screen())
+        
+        zoom_in_btn = Button(text='+', size_hint_x=0.1, font_size='18sp')
+        zoom_in_btn.bind(on_press=lambda x: self.zoom_in())
 
         nav_layout.add_widget(back_btn)
         nav_layout.add_widget(self.prev_btn)
         nav_layout.add_widget(self.page_label)
         nav_layout.add_widget(self.next_btn)
+        nav_layout.add_widget(zoom_out_btn)
+        nav_layout.add_widget(fit_btn)
+        nav_layout.add_widget(zoom_in_btn)
         
-        # ZOOMABLE PDF DISPLAY AREA
+        # ZOOMABLE PDF DISPLAY AREA - Full screen utilization
         scroll_container = Widget(size_hint_y=0.88)
-        self.pdf_zoom = ZoomableImage(size_hint=(1, 1), pos_hint={'center_x': 0.5, 'center_y': 0.5})
+        self.pdf_zoom = ZoomableImage(
+            size_hint=(1, 1), 
+            pos_hint={'center_x': 0.5, 'center_y': 0.5}
+        )
+        # Make sure the inner image fills available space
+        self.pdf_zoom.image.allow_stretch = True
+        self.pdf_zoom.image.keep_ratio = True
         scroll_container.add_widget(self.pdf_zoom)
         
         # Add to main layout
@@ -166,8 +215,7 @@ class ViewerScreen(BoxLayout):
         """Navigate to next page with mobile optimizations"""
         if self.current_page < self.total_pages:
             # Reset zoom when changing pages
-            self.pdf_zoom.scale = 1.0
-            self.pdf_zoom.pos = (0, 0)
+            self.pdf_zoom.fit_to_screen()
             
             self.current_page += 1
             self.update_page_label()
@@ -181,8 +229,7 @@ class ViewerScreen(BoxLayout):
         """Navigate to previous page with mobile optimizations"""
         if self.current_page > 1:
             # Reset zoom when changing pages
-            self.pdf_zoom.scale = 1.0
-            self.pdf_zoom.pos = (0, 0)
+            self.pdf_zoom.fit_to_screen()
             
             self.current_page -= 1
             self.update_page_label()
@@ -191,6 +238,21 @@ class ViewerScreen(BoxLayout):
             
             # Aggressive cleanup for mobile
             self.cleanup_old_cache()
+    
+    # Zoom control methods for mobile
+    def zoom_in(self):
+        """Zoom in by 50% for mobile"""
+        new_scale = min(self.pdf_zoom.scale * 1.5, self.pdf_zoom.scale_max)
+        self.pdf_zoom.scale = new_scale
+    
+    def zoom_out(self):
+        """Zoom out by 33% for mobile"""
+        new_scale = max(self.pdf_zoom.scale * 0.67, self.pdf_zoom.scale_min)
+        self.pdf_zoom.scale = new_scale
+    
+    def fit_to_screen(self):
+        """Fit to screen for mobile"""
+        self.pdf_zoom.fit_to_screen()
     
     def render_page_async(self, page_number):
         """Mobile-optimized async rendering"""
@@ -217,7 +279,7 @@ class ViewerScreen(BoxLayout):
             # Get the page
             page = self.pdf_document[page_number - 1]
             
-            # Mobile-optimized rendering
+            # Mobile-optimized rendering with adaptive zoom
             mat = fitz.Matrix(self.zoom_factor, self.zoom_factor)
             
             # Use lower quality for mobile performance
@@ -227,12 +289,12 @@ class ViewerScreen(BoxLayout):
             img_data = pix.tobytes("png")
             pil_image = Image.open(io.BytesIO(img_data))
             
-            # Aggressive resizing for mobile
-            if pil_image.width > self.max_width:
-                ratio = self.max_width / pil_image.width
+            # For mobile, let Kivy handle the scaling to fit screen
+            # Only resize if image is extremely large (memory constraint)
+            if pil_image.width > 1600:  # Only resize very large images
+                ratio = 1600 / pil_image.width
                 new_height = int(pil_image.height * ratio)
-                # Use faster resampling for mobile
-                pil_image = pil_image.resize((self.max_width, new_height), Image.Resampling.BILINEAR)
+                pil_image = pil_image.resize((1600, new_height), Image.Resampling.BILINEAR)
             
             # Optimize for mobile storage
             img_bytes = io.BytesIO()
@@ -262,8 +324,7 @@ class ViewerScreen(BoxLayout):
             self.pdf_zoom.image.texture = core_image.texture
             
             # Reset zoom and position for new page
-            self.pdf_zoom.scale = 1.0
-            self.pdf_zoom.pos = (0, 0)
+            self.pdf_zoom.fit_to_screen()
             
         except Exception as e:
             self.show_error(f"Display error: {str(e)[:30]}")

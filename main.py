@@ -231,8 +231,7 @@ class MainScreen(Screen):
                 file_path=file_path,
                 index=index,
                 on_remove_callback=self.remove_file,
-                on_view_callback=self.view_file,
-                mobile_mode=MOBILE_PLATFORM  # Pass mobile mode to widget
+                on_view_callback=self.view_file
             )
             self.file_list_layout.add_widget(file_item)
 
