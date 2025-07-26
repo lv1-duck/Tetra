@@ -5,7 +5,7 @@
 import os
 import pytest
 from tempfile import TemporaryDirectory, NamedTemporaryFile
-from core.file_manager_desktop import (DesktopPDFFileManager,
+from core.desktop_file_manager import (DesktopPDFFileManager,
                                         FileOperationResult,
                                         get_desktop_default_output_path, 
                                         validate_desktop_output_path,
@@ -113,4 +113,4 @@ def test_create_backup_filename(sample_pdf_file):
 # Test Runner
 # ===================
 if __name__ == "__main__":
-    pytest.main(["-v", "test_file_manager_desktop.py"])
+    pytest.main(["-v", "test_desktop_file_manager.py"])

@@ -20,7 +20,7 @@ from ui.ui_components import RoundedBoxLayout, StyledButton, FileItemWidget
 # PLATFORM DETECTION AND CONDITIONAL IMPORTS
 if platform in ('android', 'ios'):
     # Mobile imports
-    from core.file_manager_mobile import (
+    from core.mobile_file_manager import (
         MobilePDFFileManager as PDFFileManager,
         FileOperationResult,
         pick_files_mobile as pick_files,
@@ -33,7 +33,7 @@ if platform in ('android', 'ios'):
     CURRENT_PLATFORM = platform
 else:
     # Desktop imports
-    from core.file_manager_desktop import (
+    from core.desktop_file_manager import (
         DesktopPDFFileManager as PDFFileManager,
         FileOperationResult,
         pick_files_desktop as pick_files,
