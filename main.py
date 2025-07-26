@@ -57,8 +57,10 @@ else:
     FONT_SIZE_MEDIUM = dp(14)
     PADDING_MOBILE = dp(10)
 
+
 # MAIN SCREEN WITH PLATFORM ADAPTATIONS
 class MainScreen(Screen):
+    """Main screen for the PDF utility tool with conditionals for mobile and desktop platform use."""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
@@ -524,7 +526,7 @@ class MainScreen(Screen):
                 self._spinner_event = None
 
     def _start_spinner_animation(self, spinner_label):
-        spinner_chars = [".", "..", "...", "...."] # I WILL SOMEDAY MAKE A REAL AND BETTER SPINNER ANIMATION
+        spinner_chars = [".", "..", "...", "...."] # I WILL SOMEDAY MAKE A REAL SPINNER ANIMATION
         self._spinner_index = 0
         
         def update_spinner(dt):

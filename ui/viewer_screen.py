@@ -7,7 +7,6 @@ from kivy.uix.image import Image as KivyImage
 from kivy.core.image import Image as CoreImage
 from kivy.uix.scatter import Scatter
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.widget import Widget
 from kivy.clock import Clock
 from kivy.core.window import Window
 from PIL import Image

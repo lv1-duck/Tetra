@@ -1,384 +1,580 @@
-"""Mobile-optimized viewer screen class file"""
+"""
+Mobile File Management Module for PDF operations
+Handles file selection, validation, and PDF operations for mobile platforms (Android, iOS)
+Optimized for touch interfaces and mobile file system patterns.
+"""
 
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.label import Label
-from kivy.uix.button import Button
-from kivy.uix.image import Image as KivyImage
-from kivy.core.image import Image as CoreImage
-from kivy.clock import Clock
-from kivy.uix.scatter import Scatter
-from kivy.uix.widget import Widget
-from kivy.vector import Vector
-from PIL import Image
-import io
 import os
-from threading import Thread
-import gc
+from typing import List, Optional, Callable, Any
+from dataclasses import dataclass
+from enum import Enum
+from datetime import datetime
 
+from ui.status_popup import StatusPopup
+
+# PDF library availability check
 try:
-    import fitz  # PyMuPDF
-    PDF_LIBRARIES_AVAILABLE = True
+    import fitz
+    PDF_LIBRARY_AVAILABLE = True
 except ImportError:
-    PDF_LIBRARIES_AVAILABLE = False
+    PDF_LIBRARY_AVAILABLE = False
+
+from kivy.uix.popup import Popup
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
+from kivy.uix.textinput import TextInput
+from kivy.uix.filechooser import FileChooserIconView  # Icon view better for mobile
+from kivy.uix.label import Label
+from kivy.uix.scrollview import ScrollView
+from kivy.metrics import dp, sp
+from kivy.utils import platform
 
 
-class ZoomableImage(Scatter):
-    """Touch-enabled zoomable image widget for mobile"""
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.do_rotation = False  # Disable rotation
-        self.scale_min = 0.5
-        self.scale_max = 3.0
+# Mobile-specific imports
+if platform == 'android':
+    try:
+        from android.permissions import request_permissions, Permission # type: ignore
+        from android.storage import primary_external_storage_path, secondary_external_storage_path # type: ignore
+        ANDROID_AVAILABLE = True
         
-        self.image = KivyImage()
-        self.add_widget(self.image)
-    
-    def on_touch_down(self, touch):
-        # Store initial touch for swipe detection
-        if self.collide_point(*touch.pos):
-            self.initial_touch = touch.pos
-            return super().on_touch_down(touch)
-        return False
-    
-    def on_touch_up(self, touch):
-        if hasattr(self, 'initial_touch') and self.collide_point(*touch.pos):
-            # Detect swipe gestures
-            dx = touch.pos[0] - self.initial_touch[0]
-            dy = touch.pos[1] - self.initial_touch[1]
+    except ImportError:
+        ANDROID_AVAILABLE = False
+else:
+    ANDROID_AVAILABLE = False
+
+# FILE OPERATION RESULTS CLASS
+class FileOperationResult(Enum):
+    SUCCESS = "success"
+    ERROR = "error"
+    CANCELLED = "cancelled"
+    PERMISSION_DENIED = "permission_denied"
+
+@dataclass
+class FileOperationResponse:
+    result: FileOperationResult
+    message: str
+    data: Optional[Any] = None
+
+class MobilePDFFileManager:
+    """Manages PDF file operations and maintains file list state for mobile platforms"""
+    def __init__(self):
+        self.selected_files: List[str] = []
+        self._file_list_observers: List[Callable] = []
+        self._request_mobile_permissions()
+
+    def _request_mobile_permissions(self):
+        """Request necessary permissions for mobile platforms"""
+        if platform == 'android' and ANDROID_AVAILABLE:
+            request_permissions([
+                Permission.READ_EXTERNAL_STORAGE,
+                Permission.WRITE_EXTERNAL_STORAGE
+            ])
+
+    def add_observer(self, callback: Callable):
+        """Register callback for file list changes"""
+        self._file_list_observers.append(callback)
+
+    def remove_observer(self, callback: Callable):
+        """Unregister file list change callback"""
+        if callback in self._file_list_observers:
+            self._file_list_observers.remove(callback)
+
+    def _notify_file_list_observers(self):
+        """Notify all observers about file list changes"""
+        for callback in self._file_list_observers:
+            try:
+                callback(self.selected_files.copy())
+            except Exception as error:
+                print(f"Observer notification error: {error}")
+
+    def add_files(self, file_paths: List[str]) -> FileOperationResponse:
+        """Add valid PDF files to selected files list"""
+        if not file_paths:
+            return FileOperationResponse(FileOperationResult.ERROR, "No files selected")
+
+        added_files = []
+        invalid_files = []
+        
+        for path in file_paths:
+            file_name = os.path.basename(path)
             
-            # Horizontal swipe for page navigation (if not zoomed)
-            if abs(dx) > 100 and abs(dy) < 50 and self.scale <= 1.1:
-                if dx > 0:  # Right swipe - previous page
-                    self.parent.parent.show_previous()
-                else:  # Left swipe - next page  
-                    self.parent.parent.show_next()
-                return True
-        
-        return super().on_touch_up(touch)
-
-
-class ViewerScreen(BoxLayout):
-    def __init__(self, mobile_mode=True, **kwargs):
-        # Remove mobile_mode from kwargs before passing to parent
-        if 'mobile_mode' in kwargs:
-            kwargs.pop('mobile_mode')
-        super().__init__(**kwargs)
-        self.orientation = 'vertical'
-        
-        # Initialize PDF state
-        self.current_pdf_path = None
-        self.pdf_document = None
-        self.current_page = 1
-        self.total_pages = 0
-        self.page_cache = {}
-        
-        # Mobile-optimized settings
-        self.max_cache_size = 2  # Aggressive memory management for mobile
-        self.zoom_factor = 1.5   # Balanced quality and performance
-        self.max_width = None    # Let it scale to fit screen
-        self.render_quality = 0.8  # Reduce quality for speed
-        self.target_dpi = 120    # Lower DPI for mobile performance
-        
-        # Create UI elements
-        self.setup_ui()
-        
-        # Check if libraries are available
-        if not PDF_LIBRARIES_AVAILABLE:
-            self.show_error("PDF libraries not available. Install: pip install PyMuPDF")
-    
-    def setup_ui(self):
-        # MOBILE-OPTIMIZED NAVIGATION BAR (larger touch targets)
-        nav_layout = BoxLayout(orientation='horizontal', size_hint_y=0.12, spacing='5dp')
-
-        # Larger buttons for touch
-        back_btn = Button(text='← Back', size_hint_x=0.25, font_size='16sp')
-        back_btn.bind(on_press=lambda x: self.go_back())
-        
-        self.prev_btn = Button(text='◀', size_hint_x=0.2, font_size='18sp')
-        self.prev_btn.bind(on_press=lambda x: self.show_previous())
-        
-        self.page_label = Label(text='No PDF loaded', size_hint_x=0.3, font_size='14sp')
-        
-        self.next_btn = Button(text='▶', size_hint_x=0.2, font_size='18sp')
-        self.next_btn.bind(on_press=lambda x: self.show_next())
-
-        nav_layout.add_widget(back_btn)
-        nav_layout.add_widget(self.prev_btn)
-        nav_layout.add_widget(self.page_label)
-        nav_layout.add_widget(self.next_btn)
-        
-        # ZOOMABLE PDF DISPLAY AREA - Full screen utilization
-        scroll_container = Widget(size_hint_y=0.88)
-        self.pdf_zoom = ZoomableImage(
-            size_hint=(1, 1), 
-            pos_hint={'center_x': 0.5, 'center_y': 0.5}
-        )
-        # Make sure the inner image fills available space
-        self.pdf_zoom.image.allow_stretch = True
-        self.pdf_zoom.image.keep_ratio = True
-        scroll_container.add_widget(self.pdf_zoom)
-        
-        # Add to main layout
-        self.add_widget(nav_layout)
-        self.add_widget(scroll_container)
-        
-        # Initially disable navigation
-        self.update_navigation_state()
-
-    def go_back(self):
-        """Return to main screen"""
-        # Clean up before leaving
-        self.cleanup_resources()
-        from kivy.app import App
-        app = App.get_running_app()
-        app.root.current = 'main'
-        
-    def load_pdf(self, path):
-        """Load PDF and render first page - mobile optimized"""
-        if not PDF_LIBRARIES_AVAILABLE:
-            self.show_error("PDF libraries not available")
-            return
-        
-        if not os.path.exists(path):
-            self.show_error("PDF file not found")
-            return
-        
-        try:
-            # Clean up previous document
-            self.cleanup_resources()
-            
-            # Open PDF document with PyMuPDF
-            self.pdf_document = fitz.open(path)
-            
-            # Check if document is valid
-            if self.pdf_document.is_pdf:
-                total_pages = len(self.pdf_document)
+            if not os.path.exists(path):
+                invalid_files.append(f"{file_name} (not found)")
+            elif not self._has_file_access(path):
+                invalid_files.append(f"{file_name} (no permission)")
+            elif not path.lower().endswith('.pdf'):
+                invalid_files.append(f"{file_name} (not PDF)")
+            elif not self._is_valid_pdf(path):
+                invalid_files.append(f"{file_name} (corrupted)")
+            elif path in self.selected_files:
+                invalid_files.append(f"{file_name} (already added)")
             else:
-                self.show_error("Invalid PDF file")
-                return
-            
-            # Store PDF info
-            self.current_pdf_path = path
-            self.total_pages = total_pages
-            self.current_page = 1
-            self.page_cache.clear()
-            
-            # Update UI
-            self.update_page_label()
-            self.update_navigation_state()
-            
-            # Render first page
-            self.render_page_async(1)
-            
-        except Exception as e:
-            self.show_error(f"Failed to load PDF: {str(e)[:50]}")
-    
-    def show_next(self):
-        """Navigate to next page with mobile optimizations"""
-        if self.current_page < self.total_pages:
-            # Reset zoom when changing pages
-            self.pdf_zoom.scale = 1.0
-            self.pdf_zoom.pos = (0, 0)
-            
-            self.current_page += 1
-            self.update_page_label()
-            self.update_navigation_state()
-            self.render_page_async(self.current_page)
-            
-            # Aggressive cleanup for mobile
-            self.cleanup_old_cache()
-    
-    def show_previous(self):
-        """Navigate to previous page with mobile optimizations"""
-        if self.current_page > 1:
-            # Reset zoom when changing pages
-            self.pdf_zoom.scale = 1.0
-            self.pdf_zoom.pos = (0, 0)
-            
-            self.current_page -= 1
-            self.update_page_label()
-            self.update_navigation_state()
-            self.render_page_async(self.current_page)
-            
-            # Aggressive cleanup for mobile
-            self.cleanup_old_cache()
-    
-    def render_page_async(self, page_number):
-        """Mobile-optimized async rendering"""
-        # Check cache first
-        if page_number in self.page_cache:
-            Clock.schedule_once(lambda dt: self.display_cached_page(page_number))
-            return
+                self.selected_files.append(path)
+                added_files.append(file_name)
+
+        if added_files:
+            self._notify_file_list_observers()
         
-        # Show loading state
-        Clock.schedule_once(lambda dt: self.show_loading())
+        # Generate response messages
+        if added_files and not invalid_files:
+            return FileOperationResponse(
+                FileOperationResult.SUCCESS, 
+                f"Added {len(added_files)} files"
+            )
+        if added_files and invalid_files:
+            return FileOperationResponse(
+                FileOperationResult.SUCCESS, 
+                f"Added {len(added_files)} files\nSkipped {len(invalid_files)} invalid files"
+            )
+        return FileOperationResponse(
+            FileOperationResult.ERROR, 
+            f"No valid files added\n{'; '.join(invalid_files)}"
+        )
+
+    def remove_file(self, index: int) -> FileOperationResponse:
+        """Remove file from selected files list by index"""
+        if not (0 <= index < len(self.selected_files)):
+            return FileOperationResponse(FileOperationResult.ERROR, "Invalid selection")
         
-        # Render in background with lower priority
-        thread = Thread(target=self._render_page_thread, args=(page_number,))
-        thread.daemon = True
-        thread.start()
+        removed_file_name = os.path.basename(self.selected_files.pop(index))
+        self._notify_file_list_observers()
+        
+        return FileOperationResponse(
+            FileOperationResult.SUCCESS, 
+            f"Removed {removed_file_name}"
+        )
+
+    def clear_files(self) -> FileOperationResponse:
+        """Clear all files from selected files list"""
+        file_count = len(self.selected_files)
+        self.selected_files.clear()
+        self._notify_file_list_observers()
+        return FileOperationResponse(
+            FileOperationResult.SUCCESS, 
+            f"Cleared {file_count} files"
+        )
+
+    def move_file(self, from_index: int, to_index: int) -> FileOperationResponse:
+        """Move file to new position in selected files list"""
+        if not (0 <= from_index < len(self.selected_files)) or not (0 <= to_index < len(self.selected_files)):
+            return FileOperationResponse(FileOperationResult.ERROR, "Invalid selection")
+        
+        file_to_move = self.selected_files.pop(from_index)
+        self.selected_files.insert(to_index, file_to_move)
+        self._notify_file_list_observers()
+        
+        return FileOperationResponse(FileOperationResult.SUCCESS, "Files reordered")
+
+    def get_files(self) -> List[str]:
+        """Get copy of selected files list"""
+        return self.selected_files.copy()
+
+    def get_file_count(self) -> int:
+        """Get number of selected files"""
+        return len(self.selected_files)
     
-    def _render_page_thread(self, page_number):
-        """Mobile-optimized background rendering"""
+    def merge_pdfs(self, output_path: str) -> FileOperationResponse:
+        """Merge selected PDF files into single output file"""
+        if not PDF_LIBRARY_AVAILABLE:
+            return FileOperationResponse(
+                FileOperationResult.ERROR, 
+                "PDF library not available\nInstall PyMuPDF to enable merging"
+            )
+        if len(self.selected_files) < 2:
+            return FileOperationResponse(
+                FileOperationResult.ERROR, 
+                "Select at least 2 PDFs to merge"
+            )
+        
+        if not self._has_write_access(os.path.dirname(output_path)):
+            return FileOperationResponse(
+                FileOperationResult.PERMISSION_DENIED,
+                "No write permission for output location"
+            )
+        
         try:
-            if not self.pdf_document:
-                Clock.schedule_once(lambda dt: self.show_error("No PDF loaded"))
-                return
+            # Create a new PDF document
+            pdf_merger = fitz.open()
             
-            # Get the page
-            page = self.pdf_document[page_number - 1]
-            
-            # Mobile-optimized rendering with adaptive zoom
-            mat = fitz.Matrix(self.zoom_factor, self.zoom_factor)
-            
-            # Use lower quality for mobile performance
-            pix = page.get_pixmap(matrix=mat, alpha=False)  # No alpha for better performance
-            
-            # Convert to PIL with mobile optimizations
-            img_data = pix.tobytes("png")
-            pil_image = Image.open(io.BytesIO(img_data))
-            
-            # For mobile, let Kivy handle the scaling to fit screen
-            # Only resize if image is extremely large (memory constraint)
-            if pil_image.width > 1600:  # Only resize very large images
-                ratio = 1600 / pil_image.width
-                new_height = int(pil_image.height * ratio)
-                pil_image = pil_image.resize((1600, new_height), Image.Resampling.BILINEAR)
-            
-            # Optimize for mobile storage
-            img_bytes = io.BytesIO()
-            pil_image.save(img_bytes, format='JPEG', quality=85, optimize=True)  # JPEG for smaller size
-            img_bytes.seek(0)
-            
-            # Cache with aggressive limits
-            self.add_to_cache(page_number, img_bytes.getvalue())
-            
-            # Update UI
-            Clock.schedule_once(lambda dt: self.display_page_image(img_bytes.getvalue(), 'jpeg'))
-            
-            # Cleanup PyMuPDF resources immediately
-            pix = None
-            page = None
-            
-            # Force garbage collection on mobile
-            gc.collect()
+            for file_path in self.selected_files:
+                if not os.path.exists(file_path):
+                    pdf_merger.close()
+                    return FileOperationResponse(
+                        FileOperationResult.ERROR, 
+                        f"File missing: {os.path.basename(file_path)}"
+                    )
                 
-        except Exception as e:
-            Clock.schedule_once(lambda dt: self.show_error(f"Render error: {str(e)[:30]}"))
-    
-    def display_page_image(self, image_data, format='png'):
-        """Display image with mobile optimizations"""
+                if not self._has_file_access(file_path):
+                    pdf_merger.close()
+                    return FileOperationResponse(
+                        FileOperationResult.PERMISSION_DENIED,
+                        f"No access to: {os.path.basename(file_path)}"
+                    )
+                
+                # Open source PDF and insert all pages
+                source_pdf = fitz.open(file_path)
+                pdf_merger.insert_pdf(source_pdf)
+                source_pdf.close()
+            
+            # Ensure output directory exists
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
+            # Save the merged PDF
+            pdf_merger.save(output_path)
+            pdf_merger.close()
+            
+            return FileOperationResponse(
+                FileOperationResult.SUCCESS, 
+                f"Successfully merged {len(self.selected_files)} PDFs"
+            )
+        except PermissionError:
+            return FileOperationResponse(
+                FileOperationResult.PERMISSION_DENIED,
+                "Permission denied accessing files"
+            )
+        except Exception as error:
+            return FileOperationResponse(
+                FileOperationResult.ERROR, 
+                f"Merge failed: {str(error)}"
+            )
+
+    def _is_valid_pdf(self, path: str) -> bool:
+        """Check if file is a valid PDF"""
+        if not self._has_file_access(path):
+            return False
+            
+        if PDF_LIBRARY_AVAILABLE:
+            try:
+                doc = fitz.open(path)
+                is_pdf = doc.is_pdf
+                doc.close()
+                return is_pdf
+            except:
+                return False
+        else:
+            try:
+                with open(path, 'rb') as file:
+                    return file.read(4) == b'%PDF'
+            except:
+                return False
+
+    def _has_file_access(self, path: str) -> bool:
+        """Check if we have read access to file"""
         try:
-            core_image = CoreImage(io.BytesIO(image_data), ext=format)
-            self.pdf_zoom.image.texture = core_image.texture
+            return os.access(path, os.R_OK)
+        except:
+            return False
+
+    def _has_write_access(self, path: str) -> bool:
+        """Check if we have write access to directory"""
+        try:
+            return os.access(path, os.W_OK)
+        except:
+            return False
+
+# MOBILE FILE PICKER FUNCTIONS
+
+def pick_files_mobile(file_selection_callback: Callable[[List[str]], None]):
+    """Show mobile-optimized file picker for selecting PDF files"""
+    
+    # Start from mobile-friendly directory
+    initial_path = get_mobile_documents_path()
+    
+    file_chooser = FileChooserIconView(
+        filters=['*.pdf'],
+        multiselect=True,
+        size_hint=(1, 0.75),
+        path=initial_path
+    )
+    
+    # Mobile-optimized button layout with larger touch targets
+    button_layout = BoxLayout(
+        size_hint=(1, 0.25), 
+        spacing=dp(15), 
+        padding=dp(15),
+        orientation='horizontal'
+    )
+    
+    cancel_button = Button(
+        text="Cancel",
+        size_hint=(0.4, 1),
+        font_size=sp(16)
+    )
+    select_button = Button(
+        text="Select Files",
+        size_hint=(0.6, 1),
+        font_size=sp(16)
+    )
+    
+    button_layout.add_widget(cancel_button)
+    button_layout.add_widget(select_button)
+
+    # Path indicator for better navigation
+    path_label = Label(
+        text=f"Location: {file_chooser.path}",
+        size_hint=(1, None),
+        height=dp(30),
+        font_size=sp(12),
+        text_size=(None, None)
+    )
+
+    content_layout = BoxLayout(orientation='vertical')
+    content_layout.add_widget(path_label)
+    content_layout.add_widget(file_chooser)
+    content_layout.add_widget(button_layout)
+
+    file_picker_popup = Popup(
+        title="Select PDF Files", 
+        content=content_layout,
+        size_hint=(0.95, 0.9),  # Larger for mobile
+        auto_dismiss=False
+    )
+
+    # Update path label when directory changes
+    def update_path_label(instance, path):
+        path_label.text = f"Location: {path}"
+    
+    file_chooser.bind(path=update_path_label)
+
+    cancel_button.bind(on_release=lambda *a: (
+        file_picker_popup.dismiss(), 
+        file_selection_callback([])
+    ))
+    
+    def handle_file_selection(*args):
+        selected = file_chooser.selection
+        file_picker_popup.dismiss()
+        file_selection_callback(selected)
+    
+    select_button.bind(on_release=handle_file_selection)
+    file_picker_popup.open()
+
+
+def save_file_dialog_mobile(default_filename: str, save_path_callback: Callable[[Optional[str]], None]):
+    """Show mobile-optimized save file dialog"""
+    
+    initial_path = get_mobile_output_path()
+    
+    directory_chooser = FileChooserIconView(
+        dirselect=True,
+        size_hint=(1, 0.6),
+        path=initial_path
+    )
+    
+    # Filename input with mobile keyboard considerations
+    filename_input = TextInput(
+        text=default_filename,
+        size_hint=(1, None),
+        height=dp(50),
+        multiline=False,
+        font_size=sp(16),
+        hint_text="Enter filename"
+    )
+    
+    # Path display
+    path_label = Label(
+        text=f"Save to: {directory_chooser.path}",
+        size_hint=(1, None),
+        height=dp(40),
+        font_size=sp(12),
+        text_size=(None, None)
+    )
+    
+    # Mobile-optimized buttons
+    button_layout = BoxLayout(
+        size_hint=(1, 0.2), 
+        spacing=dp(15), 
+        padding=dp(15)
+    )
+    cancel_button = Button(
+        text="Cancel",
+        size_hint=(0.4, 1),
+        font_size=sp(16)
+    )
+    save_button = Button(
+        text="Save",
+        size_hint=(0.6, 1),
+        font_size=sp(16)
+    )
+    button_layout.add_widget(cancel_button)
+    button_layout.add_widget(save_button)
+
+    content_layout = BoxLayout(orientation='vertical')
+    content_layout.add_widget(path_label)
+    content_layout.add_widget(directory_chooser)
+    content_layout.add_widget(filename_input)
+    content_layout.add_widget(button_layout)
+
+    save_dialog_popup = Popup(
+        title="Save Merged PDF", 
+        content=content_layout,
+        size_hint=(0.95, 0.9),
+        auto_dismiss=False
+    )
+
+    # Update path label when directory changes
+    def update_path_label(instance, path):
+        path_label.text = f"Save to: {path}"
+    
+    directory_chooser.bind(path=update_path_label)
+
+    cancel_button.bind(on_release=lambda *a: (
+        save_dialog_popup.dismiss(), 
+        save_path_callback(None)
+    ))
+    
+    def handle_save_action(*args):
+        """Validate and process save action"""
+        filename = filename_input.text.strip()
+        if not filename:
+            StatusPopup.show("Error", "Please enter a filename", is_error=True)
+            return
             
-            # Reset zoom and position for new page
-            self.pdf_zoom.scale = 1.0
-            self.pdf_zoom.pos = (0, 0)
+        if not filename.lower().endswith('.pdf'):
+            filename += '.pdf'
             
-        except Exception as e:
-            self.show_error(f"Display error: {str(e)[:30]}")
+        full_path = os.path.join(directory_chooser.path, filename)
+        save_dialog_popup.dismiss()
+        save_path_callback(full_path)
     
-    def display_cached_page(self, page_number):
-        """Display page from cache"""
-        if page_number in self.page_cache:
-            self.display_page_image(self.page_cache[page_number], 'jpeg')
+    save_button.bind(on_release=handle_save_action)
+    save_dialog_popup.open()
+
+# MOBILE UTILITY FUNCTIONS
+
+def get_mobile_documents_path() -> str:
+    """Get mobile-appropriate documents directory"""
+    if platform == 'android' and ANDROID_AVAILABLE:
+        try:
+            # Try to get external storage path
+            external_path = primary_external_storage_path()
+            if external_path:
+                documents_path = os.path.join(external_path, 'Documents')
+                if os.path.exists(documents_path):
+                    return documents_path
+                # Fallback to Downloads
+                downloads_path = os.path.join(external_path, 'Download')
+                if os.path.exists(downloads_path):
+                    return downloads_path
+                return external_path
+        except:
+            pass
     
-    def add_to_cache(self, page_number, image_data):
-        """Mobile-optimized caching with aggressive cleanup"""
-        # Very aggressive cache management for mobile
-        if len(self.page_cache) >= self.max_cache_size:
-            # Remove all pages except current
-            pages_to_remove = [p for p in self.page_cache.keys() if p != self.current_page]
-            for p in pages_to_remove:
-                del self.page_cache[p]
+    # iOS or fallback
+    return os.path.expanduser("~/Documents")
+
+
+def get_mobile_output_path() -> str:
+    """Get mobile-appropriate output directory"""
+    if platform == 'android' and ANDROID_AVAILABLE:
+        try:
+            external_path = primary_external_storage_path()
+            if external_path:
+                downloads_path = os.path.join(external_path, 'Download')
+                if os.path.exists(downloads_path):
+                    return downloads_path
+                return external_path
+        except:
+            pass
+    
+    # iOS or fallback
+    documents_path = os.path.expanduser("~/Documents")
+    return documents_path if os.path.exists(documents_path) else os.path.expanduser("~")
+
+
+def get_mobile_default_output_path() -> str:
+    """Generate default output path on mobile"""
+    output_directory = get_mobile_output_path()
+    return os.path.join(output_directory, "merged_document.pdf")
+
+
+def validate_mobile_output_path(output_path: str) -> tuple[bool, str]:
+    """Validate if output path is writable on mobile"""
+    try:
+        output_directory = os.path.dirname(output_path)
+        
+        # Create directory if it doesn't exist
+        if not os.path.exists(output_directory):
+            try:
+                os.makedirs(output_directory, exist_ok=True)
+            except PermissionError:
+                return False, "No permission to create directory"
+        
+        if not os.access(output_directory, os.W_OK):
+            return False, "No write permission to directory"
             
-            # Force garbage collection
-            gc.collect()
+        if os.path.exists(output_path) and not os.access(output_path, os.W_OK):
+            return False, "Cannot overwrite existing file"
+            
+        return True, "Path is valid"
+    except Exception as error:
+        return False, f"Path validation error: {error}"
+
+
+def format_file_size_mobile(file_path: str) -> str:
+    """Format file size in mobile-friendly format"""
+    try:
+        size_bytes = os.path.getsize(file_path)
         
-        self.page_cache[page_number] = image_data
-    
-    def cleanup_old_cache(self):
-        """Aggressive cleanup for mobile memory management"""
-        # Keep only current page and adjacent pages
-        pages_to_keep = {self.current_page}
-        if self.current_page > 1:
-            pages_to_keep.add(self.current_page - 1)
-        if self.current_page < self.total_pages:
-            pages_to_keep.add(self.current_page + 1)
-        
-        pages_to_remove = [p for p in self.page_cache.keys() if p not in pages_to_keep]
-        for p in pages_to_remove:
-            del self.page_cache[p]
-        
-        # Force garbage collection
-        gc.collect()
-    
-    def cleanup_resources(self):
-        """Clean up all resources"""
-        if self.pdf_document:
-            self.pdf_document.close()
-            self.pdf_document = None
-        
-        self.page_cache.clear()
-        gc.collect()
-    
-    def show_loading(self):
-        """Mobile-friendly loading indicator"""
-        self.page_label.text = f"Loading {self.current_page}..."
-    
-    def show_error(self, message):
-        """Display error message"""
-        self.page_label.text = f"Error: {message}"
-        self.pdf_zoom.image.texture = None
-    
-    def update_page_label(self):
-        """Update page counter display"""
-        if self.total_pages > 0:
-            self.page_label.text = f"{self.current_page}/{self.total_pages}"
+        if size_bytes < 1024:
+            return f"{size_bytes}B"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.0f}KB"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes / (1024 * 1024):.1f}MB"
         else:
-            self.page_label.text = "No PDF"
-    
-    def update_navigation_state(self):
-        """Enable/disable navigation buttons"""
-        if self.total_pages == 0:
-            self.prev_btn.disabled = True
-            self.next_btn.disabled = True
-        else:
-            self.prev_btn.disabled = (self.current_page <= 1)
-            self.next_btn.disabled = (self.current_page >= self.total_pages)
-    
-    def jump_to_page(self, page_number):
-        """Jump to specific page with mobile optimizations"""
-        if 1 <= page_number <= self.total_pages:
-            self.current_page = page_number
-            self.update_page_label()
-            self.update_navigation_state()
-            self.render_page_async(page_number)
-            self.cleanup_old_cache()
-    
-    def preload_adjacent_pages(self):
-        """Simplified preloading for mobile"""
-        # Only preload next page to save memory
-        if (self.current_page < self.total_pages and 
-            self.current_page + 1 not in self.page_cache):
-            thread = Thread(target=self._render_page_thread, args=(self.current_page + 1,))
-            thread.daemon = True
-            thread.start()
-    
-    def get_pdf_info(self):
-        """Get PDF information - same interface as desktop version"""
-        if not self.current_pdf_path:
-            return None
+            return f"{size_bytes / (1024 * 1024 * 1024):.1f}GB"
+    except:
+        return "???"
+
+
+def create_mobile_backup_filename(original_path: str) -> str:
+    """Generate mobile-friendly backup filename"""
+    if not os.path.exists(original_path):
+        return original_path
         
-        return {
-            'path': self.current_pdf_path,
-            'filename': os.path.basename(self.current_pdf_path),
-            'current_page': self.current_page,
-            'total_pages': self.total_pages,
-            'cached_pages': list(self.page_cache.keys())
-        }
+    base_name, file_extension = os.path.splitext(os.path.basename(original_path))
+    file_directory = os.path.dirname(original_path)
+    timestamp = datetime.now().strftime("%m%d_%H%M")  # Shorter timestamp for mobile
     
-    def __del__(self):
-        """Cleanup on destruction"""
-        self.cleanup_resources()
+    backup_path = os.path.join(file_directory, f"{base_name}_{timestamp}{file_extension}")
+    if not os.path.exists(backup_path):
+        return backup_path
+        
+    # Handle filename collisions with simpler numbering
+    counter = 1
+    while counter < 100:  # Reduced from 1000
+        alternative_path = os.path.join(file_directory, f"{base_name}_{counter}{file_extension}")
+        if not os.path.exists(alternative_path):
+            return alternative_path
+        counter += 1
+        
+    return original_path
+
+
+def get_available_storage_space() -> str:
+    """Get available storage space for mobile devices"""
+    try:
+        if platform == 'android' and ANDROID_AVAILABLE:
+            # Android-specific storage check
+            storage_path = get_mobile_output_path()
+            statvfs = os.statvfs(storage_path)
+            available_bytes = statvfs.f_frsize * statvfs.f_available
+            return format_file_size_mobile_bytes(available_bytes)
+        else:
+            # Generic storage check
+            import shutil
+            total, used, free = shutil.disk_usage(get_mobile_output_path())
+            return format_file_size_mobile_bytes(free)
+    except:
+        return "Unknown"
+
+
+def format_file_size_mobile_bytes(size_bytes: int) -> str:
+    """Format bytes to mobile-friendly size string"""
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.0f}KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.0f}MB"
+    else:
+        return f"{size_bytes / (1024 * 1024 * 1024):.1f}GB"

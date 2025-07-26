@@ -8,7 +8,6 @@ from kivy.core.image import Image as CoreImage
 from kivy.clock import Clock
 from kivy.uix.scatter import Scatter
 from kivy.uix.widget import Widget
-from kivy.vector import Vector
 from PIL import Image
 import io
 import os
@@ -23,12 +22,12 @@ except ImportError:
 
 
 class ZoomableImage(Scatter):
-    """Enhanced touch-enabled zoomable image widget for mobile"""
+    """Touch-enabled zoomable image widget for mobile"""
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.do_rotation = False  # Disable rotation
+        self.do_rotation = False 
         self.scale_min = 0.5
-        self.scale_max = 5.0  # Allow more zoom
+        self.scale_max = 5.0
         
         self.image = KivyImage(
             allow_stretch=True,
