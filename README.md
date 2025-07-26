@@ -22,6 +22,7 @@ This project is in active development. Feedbacks and contributions are greatly a
 
 - PDF to Docx conversion (pdf2docx is what i have in mind)
 - Better UI design
+- More unit tests
 
 ---
 
