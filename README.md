@@ -2,7 +2,9 @@
 
 **Tetra** is a cross-platform PDF utility built with Python and Kivy. It offers a minimal, user-friendly interface for selecting, viewing, and merging PDF files; Designed to run on both desktops and mobile devices.
 
-This project is in active development and currently targets desktop platforms. Android support is planned for later versions.
+This project relies on a diverse set of open-source Python libraries to support cross-platform development, particularly targeting Android via Kivy and Buildozer. The core UI framework is Kivy (2.3.1) for creating mobile interfaces. Buildozer, along with python-for-android, handles packaging for Android deployment. PDF processing is done through PyMuPDF (fitz), which allows fast manipulation and rendering of PDF files without requiring external dependencies. Pillow is used for image handling, while Plyer bridges access to platform-native features like storage permissions and access on mobile devices.
+
+This project is in active development. Feedbacks and contributions are greatly appreciated.
 
 ---
 
@@ -12,9 +14,17 @@ This project is in active development and currently targets desktop platforms. A
 - View basic file info like name and size
 - Merge selected PDFs into a single document
 - Kivy-native UI
-- Portable and meant for offline use
+- Built for offline use
 
 ---
+
+## Some features/improvements that would be awesome to make.
+
+- PDF to Docx conversion (pdf2docx is what i have in mind)
+- Better UI design
+
+---
+
 
 ## 🖥️ Running on Desktop
 
