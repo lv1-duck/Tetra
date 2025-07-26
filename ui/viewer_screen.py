@@ -12,8 +12,7 @@ import os
 from threading import Thread
 
 try:
-    from pdf2image import convert_from_path
-    import PyPDF2
+    import fitz  # PyMuPDF
     PDF_LIBRARIES_AVAILABLE = True
 except ImportError:
     PDF_LIBRARIES_AVAILABLE = False
@@ -26,17 +25,22 @@ class ViewerScreen(BoxLayout):
         
         # Initialize PDF state
         self.current_pdf_path = None
+        self.pdf_document = None  # PyMuPDF document object
         self.current_page = 1
         self.total_pages = 0
         self.page_cache = {}  # Simple cache for rendered pages
         self.max_cache_size = 3  # Keep only 3 pages in memory for mobile
+        
+        # Rendering settings for PyMuPDF
+        self.zoom_factor = 1.5  # Good balance for mobile (1.0 = 72 DPI, 1.5 = 108 DPI)
+        self.max_width = 800  # Maximum width for mobile optimization
         
         # Create UI elements
         self.setup_ui()
         
         # Check if libraries are available
         if not PDF_LIBRARIES_AVAILABLE:
-            self.show_error("PDF libraries not available. Install: pip install pdf2image PyPDF2")
+            self.show_error("PDF libraries not available. Install: pip install PyMuPDF")
     
     def setup_ui(self):
         # TOP NAVIGATION BAR
@@ -86,10 +90,19 @@ class ViewerScreen(BoxLayout):
             return
         
         try:
-            # Get total pages using PyPDF2 (lightweight)
-            with open(path, 'rb') as f:
-                reader = PyPDF2.PdfReader(f, strict=False)
-                total_pages = len(reader.pages)
+            # Close existing document if any
+            if self.pdf_document:
+                self.pdf_document.close()
+            
+            # Open PDF document with PyMuPDF
+            self.pdf_document = fitz.open(path)
+            
+            # Check if document is valid and get total pages
+            if self.pdf_document.is_pdf:
+                total_pages = len(self.pdf_document)
+            else:
+                self.show_error("Invalid PDF file")
+                return
             
             # Store PDF info
             self.current_pdf_path = path
@@ -139,39 +152,44 @@ class ViewerScreen(BoxLayout):
         thread.start()
     
     def _render_page_thread(self, page_number):
-        """Background thread for page rendering"""
+        """Background thread for page rendering using PyMuPDF"""
         try:
-            # Convert PDF page to image
-            images = convert_from_path(
-                self.current_pdf_path,
-                first_page=page_number,
-                last_page=page_number,
-                dpi=150  # Good balance for mobile
-            )
+            if not self.pdf_document:
+                Clock.schedule_once(lambda dt: self.show_error("No PDF loaded"))
+                return
             
-            if images:
-                pil_image = images[0]
-                
-                # Optimize for mobile display
-                # Resize if too large (save memory)
-                max_width = 800  # Adjust based on your needs
-                if pil_image.width > max_width:
-                    ratio = max_width / pil_image.width
-                    new_height = int(pil_image.height * ratio)
-                    pil_image = pil_image.resize((max_width, new_height), Image.Resampling.LANCZOS)
-                
-                # Convert to bytes for Kivy
-                img_bytes = io.BytesIO()
-                pil_image.save(img_bytes, format='PNG', optimize=True)
-                img_bytes.seek(0)
-                
-                # Cache the image data
-                self.add_to_cache(page_number, img_bytes.getvalue())
-                
-                # Schedule UI update on main thread
-                Clock.schedule_once(lambda dt: self.display_page_image(img_bytes.getvalue()))
-            else:
-                Clock.schedule_once(lambda dt: self.show_error("Failed to render page"))
+            # Get the page (PyMuPDF uses 0-based indexing)
+            page = self.pdf_document[page_number - 1]
+            
+            # Create transformation matrix for rendering
+            mat = fitz.Matrix(self.zoom_factor, self.zoom_factor)
+            
+            # Render page to pixmap
+            pix = page.get_pixmap(matrix=mat)
+            
+            # Convert pixmap to PIL Image
+            img_data = pix.tobytes("png")
+            pil_image = Image.open(io.BytesIO(img_data))
+            
+            # Optimize for mobile display - resize if too large
+            if pil_image.width > self.max_width:
+                ratio = self.max_width / pil_image.width
+                new_height = int(pil_image.height * ratio)
+                pil_image = pil_image.resize((self.max_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Convert to bytes for Kivy
+            img_bytes = io.BytesIO()
+            pil_image.save(img_bytes, format='PNG', optimize=True)
+            img_bytes.seek(0)
+            
+            # Cache the image data
+            self.add_to_cache(page_number, img_bytes.getvalue())
+            
+            # Schedule UI update on main thread
+            Clock.schedule_once(lambda dt: self.display_page_image(img_bytes.getvalue()))
+            
+            # Clean up PyMuPDF pixmap
+            pix = None
                 
         except Exception as e:
             Clock.schedule_once(lambda dt: self.show_error(f"Render error: {str(e)[:30]}"))
@@ -245,7 +263,7 @@ class ViewerScreen(BoxLayout):
     
     def preload_adjacent_pages(self):
         """Preload next/previous pages for smoother navigation"""
-        if not self.current_pdf_path:
+        if not self.current_pdf_path or not self.pdf_document:
             return
         
         # Preload next page
@@ -276,5 +294,8 @@ class ViewerScreen(BoxLayout):
             'total_pages': self.total_pages,
             'cached_pages': list(self.page_cache.keys())
         }
-
-
+    
+    def __del__(self):
+        """Clean up resources when object is destroyed"""
+        if self.pdf_document:
+            self.pdf_document.close()
