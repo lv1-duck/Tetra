@@ -15,10 +15,8 @@ Jinja2==3.1.6
 Kivy==2.3.1
 Kivy-examples==2.3.1
 Kivy-Garden==0.1.5
-kivymd==1.2.0
 MarkupSafe==3.0.2
 packaging==25.0
-pdf2image==1.17.0
 pexpect==4.9.0
 pillow==10.4.0
 platformdirs==4.3.8
