@@ -25,5 +25,5 @@ class StatusPopup:
         )
         popup.open()
         # AUTODISMISS IN 3 SECONDS
-        Clock.schedule_once(lambda dt: popup.dismiss(), 3)
+        Clock.schedule_once(lambda dt: popup.dismiss(), 5)
  

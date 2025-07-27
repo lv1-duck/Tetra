@@ -8,7 +8,7 @@ from kivy.metrics import dp
 from ui.ui_constants import Theme, Sizes
 from kivy.uix.label import Label
 import os
-from core.file_manager_desktop import format_file_size
+from core.desktop_file_manager import format_file_size
 
 
 # CLASSES FOR UI COMPONENTS
